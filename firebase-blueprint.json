@@ -1,0 +1,20 @@
+{
+  "collections": [
+    {
+      "name": "daily_snapshots",
+      "schema": {
+        "id": "string",
+        "tanggal": "string",
+        "tanggal_update": "string",
+        "pml": "string",
+        "ppl": "string",
+        "submit": "number",
+        "draft": "number",
+        "total": "number",
+        "target": "number",
+        "progres": "string",
+        "metode_simpan": "string"
+      }
+    }
+  ]
+}

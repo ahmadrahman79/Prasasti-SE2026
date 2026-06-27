@@ -1,0 +1,8 @@
+{
+  "name": "Monitoring Progres Lapangan SE2026 v3",
+  "description": "Dashboard monitoring progres harian PML dan PPL",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

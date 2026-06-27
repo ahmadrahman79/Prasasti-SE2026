@@ -1,0 +1,10 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /daily_snapshots/{document=**} {
+      // Allow read/write for anyone since auth was removed
+      allow read, write: if true;
+    }
+  }
+}
