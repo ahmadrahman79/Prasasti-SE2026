@@ -1872,7 +1872,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto max-h-[170px] space-y-1.5 pr-1 scrollbar-thin">
+            <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
               {activeLeaderboard.length > 0 ? (
                 activeLeaderboard.map((item, idx) => {
                   const maxSubmitsAvg = Math.max(...leaderboardList.mostProductive.map(i => i.submitsAvg), 1);
