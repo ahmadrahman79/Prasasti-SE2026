@@ -968,7 +968,7 @@ export default function App() {
 
   // PJ Table Records calculated from rekapCSV data (aggregated by PJ)
   const pjTableRecords = useMemo(() => {
-    const map = new Map<string, { pj: string; submit: number; draft: number; total: number; target: number }>();
+    const map = new Map<string, { pj: string; submit: number; draft: number; total: number; target: number; ppls: Set<string>; pmls: Set<string> }>();
     
     parsedData.table1.forEach(ppl => {
       const pplKeyExact = ppl.pplName.trim().toLowerCase();
@@ -1011,17 +1011,22 @@ export default function App() {
         pj = pj.trim();
       }
       
-      const current = map.get(pj) || { pj, submit: 0, draft: 0, total: 0, target: 0 };
+      const current = map.get(pj) || { pj, submit: 0, draft: 0, total: 0, target: 0, ppls: new Set<string>(), pmls: new Set<string>() };
       
       current.submit += ppl.submit;
       current.draft += ppl.draft;
       current.total += ppl.total;
       current.target += ppl.mempawahTarget || ppl.total;
+      current.ppls.add(ppl.pplName);
+      current.pmls.add(ppl.pmlName);
       
       map.set(pj, current);
     });
     
-    return Array.from(map.values()).sort((a, b) => a.pj.localeCompare(b.pj));
+    return Array.from(map.values()).map(r => ({
+      pj: r.pj, submit: r.submit, draft: r.draft, total: r.total, target: r.target,
+      pplCount: r.ppls.size, pmlCount: r.pmls.size
+    })).sort((a, b) => a.pj.localeCompare(b.pj));
   }, [parsedData.table1, pplToPjFromRekapMap, pplToPjMap]);
 
   const uniquePjsList = useMemo(() => {
@@ -1060,14 +1065,18 @@ export default function App() {
     let draft = 0;
     let total = 0;
     let target = 0;
+    let pplCount = 0;
+    let pmlCount = 0;
     filteredPjRecords.forEach(rec => {
       submit += rec.submit;
       draft += rec.draft;
       total += rec.total;
       target += rec.target;
+      pplCount += rec.pplCount;
+      pmlCount += rec.pmlCount;
     });
     const progress = target > 0 ? parseFloat(((submit / target) * 100).toFixed(1)) : 0;
-    return { submit, draft, total, target, progress };
+    return { submit, draft, total, target, progress, pplCount, pmlCount };
   }, [filteredPjRecords]);
 
   // Rekap Mempawah Table parsed records
@@ -2545,6 +2554,12 @@ export default function App() {
                   <th className="p-3 pl-4 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handlePjTableSort('pj')}>
                     Penanggung Jawab (PJ) {renderPjSortIcon('pj')}
                   </th>
+                  <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handlePjTableSort('pplCount')}>
+                    Jml PPL {renderPjSortIcon('pplCount')}
+                  </th>
+                  <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handlePjTableSort('pmlCount')}>
+                    Jml PML {renderPjSortIcon('pmlCount')}
+                  </th>
                   <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handlePjTableSort('submit')}>
                     Jumlah Submit {renderPjSortIcon('submit')}
                   </th>
@@ -2570,6 +2585,8 @@ export default function App() {
                     return (
                       <tr key={`${rec.pj}-${idx}`} className="hover:bg-slate-50/80 transition-colors">
                         <td className="p-3 pl-4 font-semibold text-slate-700">{rec.pj}</td>
+                        <td className="p-3 text-center font-mono font-bold text-slate-600">{rec.pplCount}</td>
+                        <td className="p-3 text-center font-mono font-bold text-slate-600">{rec.pmlCount}</td>
                         <td className="p-3 text-center font-mono font-bold text-green-600 bg-green-50/20">{rec.submit}</td>
                         <td className="p-3 text-center font-mono font-bold text-amber-500 bg-amber-50/20">{rec.draft}</td>
                         <td className="p-3 text-center font-mono font-bold text-indigo-600 bg-indigo-50/20">{rec.total}</td>
@@ -2590,7 +2607,7 @@ export default function App() {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-slate-400 font-medium">
+                    <td colSpan={8} className="p-8 text-center text-slate-400 font-medium">
                       Tidak ada data PJ.
                     </td>
                   </tr>
@@ -2601,6 +2618,8 @@ export default function App() {
                     <td className="p-3 pl-4 font-black font-sans uppercase text-slate-700">
                       TOTAL GABUNGAN
                     </td>
+                    <td className="p-3 text-center font-black text-slate-700 font-mono">{pjTableTotals.pplCount}</td>
+                    <td className="p-3 text-center font-black text-slate-700 font-mono">{pjTableTotals.pmlCount}</td>
                     <td className="p-3 text-center font-black text-green-700 font-mono">{pjTableTotals.submit}</td>
                     <td className="p-3 text-center font-black text-amber-600 font-mono">{pjTableTotals.draft}</td>
                     <td className="p-3 text-center font-black text-indigo-700 font-mono">{pjTableTotals.total}</td>
