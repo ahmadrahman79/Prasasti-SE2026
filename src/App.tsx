@@ -544,6 +544,11 @@ export default function App() {
     return [...historical, ...liveRecords];
   }, [rekapHarianCSV, parsedData.table1]);
 
+  // Use parsed 'progres harian' Google Sheet for Apresiasi Bintang Progres Teraktif
+  const progresHarianCalculated = useMemo(() => {
+    return parseProgresHarianCSV(progresHarianCSV);
+  }, [progresHarianCSV]);
+
 
 
   // Combined and sorted date list from rekap harian + Progres Harian + active date from Google Sheets rekap
@@ -757,10 +762,10 @@ export default function App() {
 
   // Find the latest available date from rekap harian CSV
   const latestProgresHarianDate = useMemo(() => {
-    if (table3Calculated.length === 0) return '';
-    let maxTime = -1;
+    if (progresHarianCalculated.length === 0) return '';
+    let maxTime = 0;
     let maxStr = '';
-    table3Calculated.forEach(rec => {
+    progresHarianCalculated.forEach(rec => {
       const t = rec.date.getTime();
       if (t > maxTime) {
         maxTime = t;
@@ -768,7 +773,7 @@ export default function App() {
       }
     });
     return maxStr;
-  }, [table3Calculated]);
+  }, [progresHarianCalculated]);
 
   const activeProgresHarianDate = useMemo(() => {
     return selectedDate === 'ALL' ? latestProgresHarianDate : selectedDate;
@@ -778,7 +783,7 @@ export default function App() {
   // "Apresiasi Bintang Progres Teraktif Hari Ini ambil data dari sheet Progres Harian"
   const leadersData = useMemo(() => {
     if (!activeProgresHarianDate) return [];
-    const list = table3Calculated.filter(rec => rec.dateStr === activeProgresHarianDate);
+    const list = progresHarianCalculated.filter(rec => rec.dateStr === activeProgresHarianDate);
     return list.map(rec => ({
       name: rec.pplName,
       pmlName: rec.pmlName,
@@ -786,7 +791,7 @@ export default function App() {
       draft: rec.dailyDraft,
       total: rec.dailyTotal
     }));
-  }, [table3Calculated, activeProgresHarianDate]);
+  }, [progresHarianCalculated, activeProgresHarianDate]);
 
   const sortedLeaders = useMemo(() => {
     return [...leadersData].sort((a, b) => {
