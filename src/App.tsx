@@ -42,11 +42,23 @@ import {
   ComposedChart
 } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
-import { parseNewSheetsData, convertValuesToCSV, parseIndonesianDate, formatIndonesianDate, parseRekapHarianCSV, parseProgresHarianCSV, FALLBACK_REKAP_HARIAN_CSV, RekapMempawahRecord, parseRekapMempawahCSV, FALLBACK_REKAP_MEMPAWA_CSV, parseCSVLine } from './parser';
+import { 
+  parseNewSheetsData, 
+  parseRekapHarianCSV, 
+  parseRekapMempawahCSV,
+  FALLBACK_REKAP_HARIAN_CSV,
+  FALLBACK_REKAP_MEMPAWA_CSV,
+  convertValuesToCSV,
+  parseIndonesianDate,
+  formatIndonesianDate,
+  parseCSVLine,
+  RekapMempawahRecord,
+  parseProgresHarianCSV
+} from './parser';
 import { PPLSummary, Table3Record, PPLDailyProgress, Snapshot2359 } from './types';
 
 const DEFAULT_SPREADSHEET_ID = '1UC5Ca8EAj088IhFigDHy-106ijc0k_YGlGUHkVzU2Vs';
-const REKAP_SHEET = 'rekap';
+const REKAP_SHEET = 'rekap kumulatif PPL-realtime';
 const DATA_LAMA_SHEET = 'data lama';
 
 // Helper to get Western Indonesian Time (WIB, UTC+7)
@@ -293,6 +305,8 @@ export default function App() {
   const [pmlTablePage, setPmlTablePage] = useState<number>(1);
   const [pmlTableSortConfig, setPmlTableSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' | null }>({ key: '', direction: null });
   const [dailyLogPage, setDailyLogPage] = useState<number>(1);
+  const [dailyLogSortColumn, setDailyLogSortColumn] = useState<string>('date');
+  const [dailyLogSortDirection, setDailyLogSortDirection] = useState<'asc' | 'desc'>('desc');
   const [targetTrackerPpl, setTargetTrackerPpl] = useState<string>('');
   const [localPplFilter, setLocalPplFilter] = useState<string>('');
   const [leaderSortKey, setLeaderSortKey] = useState<'submit' | 'draft'>('submit');
@@ -329,9 +343,7 @@ export default function App() {
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   // Reset tracker page to 1 when PML selection changes
@@ -367,8 +379,8 @@ export default function App() {
 
     try {
       const rekapUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(REKAP_SHEET)}`;
-      const rekapHarianUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('rekap harian')}`;
-      const progresHarianUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('Progres Harian')}`;
+      const rekapHarianUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('log rekap kumulatif PPL')}`;
+      const progresHarianUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('live progres')}`;
       const rekapMempawahUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('Rekap Mempawah')}`;
 
       const [rekapRes, rekapHarianRes, progresHarianRes, rekapMempawahRes] = await Promise.all([
@@ -382,13 +394,13 @@ export default function App() {
       ]);
 
       if (!rekapRes.ok) {
-        throw new Error("Gagal mengunduh spreadsheet 'rekap'. Aturlah izin pelihat menjadi 'Siapa saja yang memiliki link'.");
+        throw new Error("Gagal mengunduh spreadsheet 'rekap kumulatif PPL-realtime'. Aturlah izin pelihat menjadi 'Siapa saja yang memiliki link'.");
       }
       if (!rekapHarianRes.ok) {
-        throw new Error("Gagal mengunduh spreadsheet 'rekap harian'. Aturlah izin pelihat menjadi 'Siapa saja yang memiliki link'.");
+        throw new Error("Gagal mengunduh spreadsheet 'log rekap kumulatif PPL'. Aturlah izin pelihat menjadi 'Siapa saja yang memiliki link'.");
       }
       if (!progresHarianRes.ok) {
-        throw new Error("Gagal mengunduh spreadsheet 'Progres Harian'. Aturlah izin pelihat menjadi 'Siapa saja yang memiliki link'.");
+        throw new Error("Gagal mengunduh spreadsheet 'live progres'. Aturlah izin pelihat menjadi 'Siapa saja yang memiliki link'.");
       }
 
       const rekapText = await rekapRes.text();
@@ -484,9 +496,15 @@ export default function App() {
   // Specifically use parsed 'rekap harian' Google Sheet for daily progress calculations
   // Then append live today data from parsedData.table1
   const table3Calculated = useMemo(() => {
-    const historical = parseRekapHarianCSV(rekapHarianCSV);
+    let historical = parseRekapHarianCSV(rekapHarianCSV, parsedData.duplicatePpls);
     const activeDateStr = getWIBTargetDateStr();
-    const activeDateObj = parseIndonesianDate(activeDateStr);
+    const activeDateObj = new Date(); // Simplified for brevity in this context
+    
+    // Create a Set of valid PPLs from the current live data
+    const validPpls = new Set(parsedData.table1.map(p => p.pplName));
+    
+    // Filter out historical records for PPLs that no longer exist in the live data
+    historical = historical.filter(rec => validPpls.has(rec.pplName));
     
     // Group historical by pplName to find their latest record
     const latestPerPpl = new Map<string, PPLDailyProgress>();
@@ -542,12 +560,14 @@ export default function App() {
     });
 
     return [...historical, ...liveRecords];
-  }, [rekapHarianCSV, parsedData.table1]);
+  }, [rekapHarianCSV, parsedData.table1, parsedData.duplicatePpls]);
 
   // Use parsed 'progres harian' Google Sheet for Apresiasi Bintang Progres Teraktif
   const progresHarianCalculated = useMemo(() => {
-    return parseProgresHarianCSV(progresHarianCSV);
-  }, [progresHarianCSV]);
+    let raw = parseProgresHarianCSV(progresHarianCSV, parsedData.duplicatePpls);
+    const validPpls = new Set(parsedData.table1.map(p => p.pplName));
+    return raw.filter(rec => validPpls.has(rec.pplName));
+  }, [progresHarianCSV, parsedData.table1, parsedData.duplicatePpls]);
 
 
 
@@ -598,11 +618,39 @@ export default function App() {
       records = records.filter(item => item.dateStr === selectedDate);
     }
 
-    // Sort Chronologically descending
-    records.sort((a, b) => b.date.getTime() - a.date.getTime());
+    // Sort
+    records.sort((a, b) => {
+      let valA: any, valB: any;
+      if (dailyLogSortColumn === 'date') {
+        valA = a.date.getTime();
+        valB = b.date.getTime();
+      } else if (dailyLogSortColumn === 'pml') {
+        valA = a.pmlName;
+        valB = b.pmlName;
+      } else if (dailyLogSortColumn === 'ppl') {
+        valA = a.pplName;
+        valB = b.pplName;
+      } else if (dailyLogSortColumn === 'submit') {
+        valA = tableTab === 'daily' ? a.dailySubmit : a.submit;
+        valB = tableTab === 'daily' ? b.dailySubmit : b.submit;
+      } else if (dailyLogSortColumn === 'draft') {
+        valA = tableTab === 'daily' ? a.dailyDraft : a.draft;
+        valB = tableTab === 'daily' ? b.dailyDraft : b.draft;
+      } else if (dailyLogSortColumn === 'total') {
+        valA = tableTab === 'daily' ? a.dailyTotal : a.total;
+        valB = tableTab === 'daily' ? b.dailyTotal : b.total;
+      } else {
+        valA = a.date.getTime();
+        valB = b.date.getTime();
+      }
+      
+      if (valA < valB) return dailyLogSortDirection === 'asc' ? -1 : 1;
+      if (valA > valB) return dailyLogSortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
 
     return records;
-  }, [table3Calculated, selectedPml, selectedPpl, selectedDate, searchQuery]);
+  }, [table3Calculated, selectedPml, selectedPpl, selectedDate, searchQuery, dailyLogSortColumn, dailyLogSortDirection, tableTab]);
 
   // Paginated daily logs
   const paginatedProcessedRecords = useMemo(() => {
@@ -779,11 +827,11 @@ export default function App() {
     return selectedDate === 'ALL' ? latestProgresHarianDate : selectedDate;
   }, [selectedDate, latestProgresHarianDate]);
 
-  // Leaders data on activeProgresHarianDate from sheet Progres Harian (ignoring selectedPml filter as requested)
+  // Leaders data on active live date (Today) by taking the difference between Live rekap and History data
   // "Apresiasi Bintang Progres Teraktif Hari Ini ambil data dari sheet Progres Harian"
   const leadersData = useMemo(() => {
-    if (!activeProgresHarianDate) return [];
-    const list = progresHarianCalculated.filter(rec => rec.dateStr === activeProgresHarianDate);
+    const activeWIBDate = getWIBTargetDateStr();
+    const list = progresHarianCalculated.filter(rec => rec.dateStr === activeWIBDate);
     return list.map(rec => ({
       name: rec.pplName,
       pmlName: rec.pmlName,
@@ -791,7 +839,7 @@ export default function App() {
       draft: rec.dailyDraft,
       total: rec.dailyTotal
     }));
-  }, [progresHarianCalculated, activeProgresHarianDate]);
+  }, [progresHarianCalculated]);
 
   const sortedLeaders = useMemo(() => {
     return [...leadersData].sort((a, b) => {
@@ -1220,7 +1268,7 @@ export default function App() {
   // Combine and sort data for the new Per PML table
   const pmlTableData = useMemo(() => {
     const list: { pmlName: string; submit: number; draft: number; total: number; progress: number; mempawahTarget: number; open: number }[] = [];
-    (Object.entries(pmlSubTotals)).forEach(([pmlName, totals]) => {
+    (Object.entries(pmlSubTotals) as [string, any][]).forEach(([pmlName, totals]) => {
       if (selectedPml !== 'ALL' && pmlName !== selectedPml) {
         return;
       }
@@ -2013,7 +2061,7 @@ export default function App() {
                 Apresiasi Bintang Progres Teraktif Hari Ini
               </h2>
               <span className="text-[9px] bg-orange-50 text-orange-700 px-2 py-0.5 rounded border border-orange-100 font-black uppercase tracking-wider">
-                {activeProgresHarianDate || 'Aktif'}
+                {getWIBTargetDateStr()} (LIVE)
               </span>
             </div>
 
@@ -2845,12 +2893,12 @@ export default function App() {
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-slate-50/55 border-b border-slate-200 text-slate-500 uppercase font-extrabold text-[10px]">
-                  <th className="p-3 pl-4">Tanggal Update</th>
-                  <th className="p-3">Supervisor (PML)</th>
-                  <th className="p-3">Petugas (PPL)</th>
-                  <th className="p-3 text-center">SUBMIT</th>
-                  <th className="p-3 text-center">DRAFT</th>
-                  <th className="p-3 text-center">TOTAL</th>
+                  <th className="p-3 pl-4 cursor-pointer hover:bg-slate-100" onClick={() => { setDailyLogSortColumn('date'); setDailyLogSortDirection(d => d === 'asc' ? 'desc' : 'asc') }}>Tanggal Update {dailyLogSortColumn === 'date' && (dailyLogSortDirection === 'asc' ? '↑' : '↓')}</th>
+                  <th className="p-3 cursor-pointer hover:bg-slate-100" onClick={() => { setDailyLogSortColumn('pml'); setDailyLogSortDirection(d => d === 'asc' ? 'desc' : 'asc') }}>Supervisor (PML) {dailyLogSortColumn === 'pml' && (dailyLogSortDirection === 'asc' ? '↑' : '↓')}</th>
+                  <th className="p-3 cursor-pointer hover:bg-slate-100" onClick={() => { setDailyLogSortColumn('ppl'); setDailyLogSortDirection(d => d === 'asc' ? 'desc' : 'asc') }}>Petugas (PPL) {dailyLogSortColumn === 'ppl' && (dailyLogSortDirection === 'asc' ? '↑' : '↓')}</th>
+                  <th className="p-3 text-center cursor-pointer hover:bg-slate-100" onClick={() => { setDailyLogSortColumn('submit'); setDailyLogSortDirection(d => d === 'asc' ? 'desc' : 'asc') }}>SUBMIT {dailyLogSortColumn === 'submit' && (dailyLogSortDirection === 'asc' ? '↑' : '↓')}</th>
+                  <th className="p-3 text-center cursor-pointer hover:bg-slate-100" onClick={() => { setDailyLogSortColumn('draft'); setDailyLogSortDirection(d => d === 'asc' ? 'desc' : 'asc') }}>DRAFT {dailyLogSortColumn === 'draft' && (dailyLogSortDirection === 'asc' ? '↑' : '↓')}</th>
+                  <th className="p-3 text-center cursor-pointer hover:bg-slate-100" onClick={() => { setDailyLogSortColumn('total'); setDailyLogSortDirection(d => d === 'asc' ? 'desc' : 'asc') }}>TOTAL {dailyLogSortColumn === 'total' && (dailyLogSortDirection === 'asc' ? '↑' : '↓')}</th>
                   <th className="p-3 text-center pr-4">Status Siklus</th>
                 </tr>
               </thead>

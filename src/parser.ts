@@ -64,6 +64,7 @@ export interface ParsedModel {
   pmlList: string[];
   pplList: { name: string; pml: string }[];
   dateList: string[]; // sorted Indonesian date strings
+  duplicatePpls: Set<string>;
 }
 
 // Helper to convert double list representation from Google Sheets API to standard CSV string
@@ -372,7 +373,6 @@ export function parseNewSheetsData(
     const dateB = datesParsedMap.get(b) || new Date(0);
     return dateA.getTime() - dateB.getTime();
   });
-  
   return {
     table1,
     table2: [],
@@ -380,7 +380,8 @@ export function parseNewSheetsData(
     table3Calculated,
     pmlList,
     pplList,
-    dateList
+    dateList,
+    duplicatePpls
   };
 }
 
@@ -416,7 +417,7 @@ export function getElapsedDaysFromStart(date: Date): number {
   return Math.max(1, diffDays + 1);
 }
 
-export function parseRekapHarianCSV(csvText: string): PPLDailyProgress[] {
+export function parseRekapHarianCSV(csvText: string, globalDuplicatePpls?: Set<string>): PPLDailyProgress[] {
   const lines = csvText.split(/\r?\n/);
   const rawRecords: RekapHarianRecord[] = [];
 
@@ -449,23 +450,26 @@ export function parseRekapHarianCSV(csvText: string): PPLDailyProgress[] {
   }
 
   // Determine duplicate names (to match parseNewSheetsData's disambiguation)
-  const pplNameToPmls = new Map<string, Set<string>>();
-  rawRecords.forEach(r => {
-    if (!pplNameToPmls.has(r.pplName)) {
-      pplNameToPmls.set(r.pplName, new Set());
-    }
-    pplNameToPmls.get(r.pplName)!.add(r.pmlName);
-  });
+  let duplicatePpls = globalDuplicatePpls;
+  if (!duplicatePpls) {
+    const pplNameToPmls = new Map<string, Set<string>>();
+    rawRecords.forEach(r => {
+      if (!pplNameToPmls.has(r.pplName)) {
+        pplNameToPmls.set(r.pplName, new Set());
+      }
+      pplNameToPmls.get(r.pplName)!.add(r.pmlName);
+    });
 
-  const duplicatePpls = new Set<string>();
-  pplNameToPmls.forEach((pmls, ppl) => {
-    if (pmls.size > 1) {
-      duplicatePpls.add(ppl);
-    }
-  });
+    duplicatePpls = new Set<string>();
+    pplNameToPmls.forEach((pmls, ppl) => {
+      if (pmls.size > 1) {
+        duplicatePpls!.add(ppl);
+      }
+    });
+  }
 
   const getDisambiguatedPplName = (ppl: string, pml: string): string => {
-    if (duplicatePpls.has(ppl)) {
+    if (duplicatePpls!.has(ppl)) {
       return `${ppl} (${pml})`;
     }
     return ppl;
@@ -544,7 +548,7 @@ export function parseRekapHarianCSV(csvText: string): PPLDailyProgress[] {
   return result;
 }
 
-export function parseProgresHarianCSV(csvText: string): PPLDailyProgress[] {
+export function parseProgresHarianCSV(csvText: string, globalDuplicatePpls: Set<string>): PPLDailyProgress[] {
   const lines = csvText.split(/\r?\n/);
   const rawRecords: RekapHarianRecord[] = [];
 
@@ -568,23 +572,8 @@ export function parseProgresHarianCSV(csvText: string): PPLDailyProgress[] {
     }
   }
 
-  const pplNameToPmls = new Map<string, Set<string>>();
-  rawRecords.forEach(r => {
-    if (!pplNameToPmls.has(r.pplName)) {
-      pplNameToPmls.set(r.pplName, new Set());
-    }
-    pplNameToPmls.get(r.pplName)!.add(r.pmlName);
-  });
-
-  const duplicatePpls = new Set<string>();
-  pplNameToPmls.forEach((pmls, ppl) => {
-    if (pmls.size > 1) {
-      duplicatePpls.add(ppl);
-    }
-  });
-
   const getDisambiguatedPplName = (ppl: string, pml: string): string => {
-    if (duplicatePpls.has(ppl)) {
+    if (globalDuplicatePpls && globalDuplicatePpls.has(ppl)) {
       return `${ppl} (${pml})`;
     }
     return ppl;
