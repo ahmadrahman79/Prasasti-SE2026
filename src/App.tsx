@@ -326,7 +326,10 @@ export default function App() {
   const [selectedMempawahDesaFilter, setSelectedMempawahDesaFilter] = useState<string>('ALL');
   const [selectedMempawahKecFilter, setSelectedMempawahKecFilter] = useState<string>('ALL');
   const [selectedMempawahSlsFilter, setSelectedMempawahSlsFilter] = useState<string>('ALL');
-  const [mempawahSortColumn, setMempawahSortColumn] = useState<string>('progress'); // 'pj' | 'kecamatan' | 'desa' | 'sls' | 'submit' | 'draft' | 'total' | 'target' | 'progress'
+  const [selectedMempawahPplFilter, setSelectedMempawahPplFilter] = useState<string>('ALL');
+  const [selectedMempawahPmlFilter, setSelectedMempawahPmlFilter] = useState<string>('ALL');
+  const [selectedMempawahGcPbiFilter, setSelectedMempawahGcPbiFilter] = useState<string>('ALL');
+  const [mempawahSortColumn, setMempawahSortColumn] = useState<string>('progress'); // 'pj' | 'kecamatan' | 'desa' | 'sls' | 'submit' | 'draft' | 'total' | 'target' | 'targetPbi' | 'progress'
   const [mempawahSortDirection, setMempawahSortDirection] = useState<'asc' | 'desc'>('desc');
 
   // Pagination pages
@@ -661,6 +664,7 @@ export default function App() {
   const totalDailyLogPages = useMemo(() => {
     return Math.ceil(processedRecords.length / 10) || 1;
   }, [processedRecords]);
+
 
   // Metrics KPI calculations
   const metricsKPIs = useMemo(() => {
@@ -1084,16 +1088,51 @@ export default function App() {
     return parseRekapMempawahCSV(rekapMempawahCSV);
   }, [rekapMempawahCSV]);
 
+  // GC PBI target summary
+  const gcPbiStats = useMemo(() => {
+    let completed = 0;
+    let inProgress = 0;
+    let notStarted = 0;
+    let totalSls = 0;
+
+    parsedMempawahRecords.forEach(rec => {
+      if (rec.targetPbi > 0) {
+        totalSls++;
+        if (rec.submit >= rec.target) {
+          completed++;
+        } else if (rec.submit > 0 || rec.draft > 0) {
+          inProgress++;
+        } else {
+          notStarted++;
+        }
+      }
+    });
+
+    return {
+      total: totalSls,
+      completed,
+      inProgress,
+      notStarted,
+      completedPct: totalSls > 0 ? (completed / totalSls * 100).toFixed(1) : '0',
+      inProgressPct: totalSls > 0 ? (inProgress / totalSls * 100).toFixed(1) : '0',
+      notStartedPct: totalSls > 0 ? (notStarted / totalSls * 100).toFixed(1) : '0'
+    };
+  }, [parsedMempawahRecords]);
+
   // Unique filters for Rekap Mempawah
   const mempawahFilters = useMemo(() => {
     const pjs = new Set<string>();
     const desas = new Set<string>();
     const kecamatans = new Set<string>();
     const slss = new Set<string>();
+    const ppls = new Set<string>();
+    const pmls = new Set<string>();
     
     parsedMempawahRecords.forEach(rec => {
       if (rec.pj) pjs.add(rec.pj);
       if (rec.kecamatan) kecamatans.add(rec.kecamatan);
+      if (rec.pplName) ppls.add(rec.pplName);
+      if (rec.pmlName) pmls.add(rec.pmlName);
       
       // Hierarchical filtering logic
       const matchKec = selectedMempawahKecFilter === 'ALL' || rec.kecamatan === selectedMempawahKecFilter;
@@ -1107,7 +1146,9 @@ export default function App() {
       pjs: Array.from(pjs).sort(),
       desas: Array.from(desas).sort(),
       kecamatans: Array.from(kecamatans).sort(),
-      slss: Array.from(slss).sort()
+      slss: Array.from(slss).sort(),
+      ppls: Array.from(ppls).sort(),
+      pmls: Array.from(pmls).sort()
     };
   }, [parsedMempawahRecords, selectedMempawahKecFilter, selectedMempawahDesaFilter]);
 
@@ -1117,7 +1158,11 @@ export default function App() {
       const matchDesa = selectedMempawahDesaFilter === 'ALL' || rec.desa === selectedMempawahDesaFilter;
       const matchKec = selectedMempawahKecFilter === 'ALL' || rec.kecamatan === selectedMempawahKecFilter;
       const matchSls = selectedMempawahSlsFilter === 'ALL' || rec.sls === selectedMempawahSlsFilter;
-      return matchPj && matchDesa && matchKec && matchSls;
+      const matchPpl = selectedMempawahPplFilter === 'ALL' || rec.pplName === selectedMempawahPplFilter;
+      const matchPml = selectedMempawahPmlFilter === 'ALL' || rec.pmlName === selectedMempawahPmlFilter;
+      const matchGcPbi = selectedMempawahGcPbiFilter === 'ALL' || 
+                         (selectedMempawahGcPbiFilter === 'ADA' ? rec.targetPbi > 0 : rec.targetPbi === 0);
+      return matchPj && matchDesa && matchKec && matchSls && matchPpl && matchPml && matchGcPbi;
     });
 
     records = [...records].sort((a, b) => {
@@ -1135,23 +1180,25 @@ export default function App() {
     });
 
     return records;
-  }, [parsedMempawahRecords, selectedMempawahPjFilter, selectedMempawahDesaFilter, selectedMempawahKecFilter, selectedMempawahSlsFilter, mempawahSortColumn, mempawahSortDirection]);
+  }, [parsedMempawahRecords, selectedMempawahPjFilter, selectedMempawahDesaFilter, selectedMempawahKecFilter, selectedMempawahSlsFilter, selectedMempawahPplFilter, selectedMempawahPmlFilter, selectedMempawahGcPbiFilter, mempawahSortColumn, mempawahSortDirection]);
 
   const mempawahTotals = useMemo(() => {
     let submit = 0;
     let draft = 0;
     let total = 0;
     let target = 0;
+    let targetPbi = 0;
     let open = 0;
     filteredMempawahRecords.forEach(rec => {
       submit += rec.submit;
       draft += rec.draft;
       total += rec.total;
       target += rec.target;
+      targetPbi += rec.targetPbi;
       open += rec.open;
     });
     const progress = target > 0 ? parseFloat(((submit / target) * 100).toFixed(1)) : 0;
-    return { submit, draft, total, target, open, progress };
+    return { submit, draft, total, target, targetPbi, open, progress };
   }, [filteredMempawahRecords]);
 
   // Mempawah Table pagination
@@ -1734,7 +1781,7 @@ export default function App() {
 
 
         {/* KPI Bar */}
-        <div className="col-span-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="col-span-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           
           {/* Card 1: Total Submit */}
           <div className="bg-white p-3 rounded-lg border border-slate-200 flex flex-col justify-between shadow-2xs h-24">
@@ -1778,7 +1825,40 @@ export default function App() {
               ></div>
             </div>
           </div>
-          {/* Card 4: Most Active Officer PPL */}
+
+          {/* Card 4: SLS GC PBI Stats */}
+          <div className="bg-white p-3 rounded-lg border border-slate-200 flex flex-col justify-between shadow-2xs h-24 relative overflow-hidden group group-hover:overflow-visible">
+            <div className="flex justify-between items-center">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block truncate">Progres SLS GC PBI</span>
+              <span className="text-[8px] font-bold text-indigo-500 bg-indigo-50 px-1 rounded-sm">{gcPbiStats.total} SLS</span>
+            </div>
+            
+            <div className="flex items-center gap-1 mt-1 justify-between flex-1">
+              <div className="flex flex-col text-center w-1/3">
+                <span className="text-[9px] font-extrabold text-slate-400 truncate">SELESAI</span>
+                <span className="text-sm font-black text-emerald-600 leading-none mt-0.5">{gcPbiStats.completed}</span>
+                <span className="text-[8px] font-bold text-slate-500">{gcPbiStats.completedPct}%</span>
+              </div>
+              <div className="flex flex-col text-center w-1/3 border-x border-slate-100">
+                <span className="text-[9px] font-extrabold text-slate-400 truncate">PROSES</span>
+                <span className="text-sm font-black text-blue-600 leading-none mt-0.5">{gcPbiStats.inProgress}</span>
+                <span className="text-[8px] font-bold text-slate-500">{gcPbiStats.inProgressPct}%</span>
+              </div>
+              <div className="flex flex-col text-center w-1/3">
+                <span className="text-[9px] font-extrabold text-slate-400 truncate">BELUM</span>
+                <span className="text-sm font-black text-rose-500 leading-none mt-0.5">{gcPbiStats.notStarted}</span>
+                <span className="text-[8px] font-bold text-slate-500">{gcPbiStats.notStartedPct}%</span>
+              </div>
+            </div>
+            
+            <div className="absolute inset-x-0 bottom-0 translate-y-full group-hover:translate-y-0 transition-transform bg-slate-800/95 p-1.5 flex items-center justify-center z-10">
+              <span className="text-[9px] text-white text-center font-medium leading-tight">
+                *Ada 222 KK target GC PBI tidak diketahui lokasi SLS-nya (tersebar di seluruh SLS)
+              </span>
+            </div>
+          </div>
+
+          {/* Card 5: Most Active Officer PPL */}
           <div className="bg-white p-3 rounded-lg border border-slate-200 flex flex-col justify-between shadow-2xs h-24">
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">PPL Paling Aktif (Submit)</span>
             <div className="flex items-center gap-2.5 mt-1">
@@ -2674,7 +2754,7 @@ export default function App() {
             </div>
             
             {/* Multiple Filters Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-200/60">
+            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-7 gap-3 mt-4 pt-4 border-t border-slate-200/60">
               {/* PJ filter */}
               <div className="flex flex-col gap-1">
                 <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wide">Filter PJ:</span>
@@ -2736,6 +2816,49 @@ export default function App() {
                   options={[
                     { label: "Semua SLS", value: "ALL" },
                     ...mempawahFilters.slss.map(sls => ({ label: sls, value: sls }))
+                  ]}
+                />
+              </div>
+
+              {/* PPL filter */}
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wide">Filter PPL:</span>
+                <SearchableSelect
+                  value={selectedMempawahPplFilter}
+                  onChange={(val) => { setSelectedMempawahPplFilter(val); setMempawahTablePage(1); }}
+                  placeholder="Pilih PPL..."
+                  options={[
+                    { label: "Semua PPL", value: "ALL" },
+                    ...mempawahFilters.ppls.map(ppl => ({ label: ppl, value: ppl }))
+                  ]}
+                />
+              </div>
+
+              {/* PML filter */}
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wide">Filter PML:</span>
+                <SearchableSelect
+                  value={selectedMempawahPmlFilter}
+                  onChange={(val) => { setSelectedMempawahPmlFilter(val); setMempawahTablePage(1); }}
+                  placeholder="Pilih PML..."
+                  options={[
+                    { label: "Semua PML", value: "ALL" },
+                    ...mempawahFilters.pmls.map(pml => ({ label: pml, value: pml }))
+                  ]}
+                />
+              </div>
+
+              {/* Target GC PBI filter */}
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wide">Filter Target PBI:</span>
+                <SearchableSelect
+                  value={selectedMempawahGcPbiFilter}
+                  onChange={(val) => { setSelectedMempawahGcPbiFilter(val); setMempawahTablePage(1); }}
+                  placeholder="Pilih PBI..."
+                  options={[
+                    { label: "Semua Target PBI", value: "ALL" },
+                    { label: "Ada Target PBI", value: "ADA" },
+                    { label: "Tidak Ada Target PBI", value: "TIDAK_ADA" }
                   ]}
                 />
               </div>
@@ -2801,6 +2924,9 @@ export default function App() {
                   <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleMempawahTableSort('target')}>
                     Target {renderMempawahSortIcon('target')}
                   </th>
+                  <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleMempawahTableSort('targetPbi')}>
+                    Jumlah Target PBI {renderMempawahSortIcon('targetPbi')}
+                  </th>
                   <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleMempawahTableSort('open')}>
                     Open {renderMempawahSortIcon('open')}
                   </th>
@@ -2828,6 +2954,7 @@ export default function App() {
                         <td className="p-3 text-center font-mono font-bold text-amber-500 bg-amber-50/15">{rec.draft}</td>
                         <td className="p-3 text-center font-mono font-bold text-indigo-600 bg-indigo-50/15">{rec.total}</td>
                         <td className="p-3 text-center font-mono font-bold text-slate-500">{rec.target}</td>
+                        <td className="p-3 text-center font-mono font-bold text-blue-600 bg-blue-50/15">{rec.targetPbi}</td>
                         <td className="p-3 text-center font-mono font-bold text-rose-500">{rec.open}</td>
                         <td className="p-3 pr-4">
                           <div className="flex items-center gap-2 min-w-[100px]">
@@ -2845,7 +2972,7 @@ export default function App() {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={12} className="p-8 text-center text-slate-400 font-medium">
+                    <td colSpan={13} className="p-8 text-center text-slate-400 font-medium">
                       Tidak ada data untuk filter wilayah yang aktif.
                     </td>
                   </tr>

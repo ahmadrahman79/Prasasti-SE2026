@@ -621,6 +621,7 @@ export interface RekapMempawahRecord {
   draft: number;
   total: number;
   target: number;
+  targetPbi: number;
   open: number;
 }
 
@@ -668,6 +669,7 @@ export function parseRekapMempawahCSV(csvText: string): RekapMempawahRecord[] {
   const idxDraft = findIndex(['draf', 'draft', 'jumlah draf'], ['draf', 'draft']);
   const idxTotal = findIndex(['total', 'total submit+draf', 'total submit + draf'], ['total', 'tot']);
   const idxTarget = findIndex(['target', 'muatan prelist', 'target muatan'], ['target', 'prelist', 'muatan']);
+  const idxTargetPbi = findIndex(['jumlah target pbi', 'target pbi', 'pbi'], ['pbi']);
 
   const records: RekapMempawahRecord[] = [];
   
@@ -689,6 +691,7 @@ export function parseRekapMempawahCSV(csvText: string): RekapMempawahRecord[] {
     const draft = idxDraft !== -1 && cols[idxDraft] ? (parseInt(cols[idxDraft], 10) || 0) : 0;
     const total = idxTotal !== -1 && cols[idxTotal] ? (parseInt(cols[idxTotal], 10) || 0) : (submit + draft);
     const target = idxTarget !== -1 && cols[idxTarget] ? (parseInt(cols[idxTarget], 10) || 0) : total;
+    const targetPbi = idxTargetPbi !== -1 && cols[idxTargetPbi] ? (parseInt(cols[idxTargetPbi], 10) || 0) : 0;
     
     if (kecamatan || desa || sls || pplName) {
       records.push({
@@ -702,6 +705,7 @@ export function parseRekapMempawahCSV(csvText: string): RekapMempawahRecord[] {
         draft,
         total,
         target,
+        targetPbi,
         open: Math.max(0, target - (submit + draft))
       });
     }
