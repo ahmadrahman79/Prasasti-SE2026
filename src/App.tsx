@@ -326,11 +326,17 @@ export default function App() {
   const [selectedMempawahDesaFilter, setSelectedMempawahDesaFilter] = useState<string>('ALL');
   const [selectedMempawahKecFilter, setSelectedMempawahKecFilter] = useState<string>('ALL');
   const [selectedMempawahSlsFilter, setSelectedMempawahSlsFilter] = useState<string>('ALL');
-  const [selectedMempawahPplFilter, setSelectedMempawahPplFilter] = useState<string>('ALL');
-  const [selectedMempawahPmlFilter, setSelectedMempawahPmlFilter] = useState<string>('ALL');
   const [selectedMempawahGcPbiFilter, setSelectedMempawahGcPbiFilter] = useState<string>('ALL');
   const [mempawahSortColumn, setMempawahSortColumn] = useState<string>('progress'); // 'pj' | 'kecamatan' | 'desa' | 'sls' | 'submit' | 'draft' | 'total' | 'target' | 'targetPbi' | 'progress'
   const [mempawahSortDirection, setMempawahSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [geoChartLevel, setGeoChartLevel] = useState<'kecamatan' | 'desa'>('kecamatan');
+  const [geoChartKecFilter, setGeoChartKecFilter] = useState<string>('ALL');
+  
+  const [leadersPage, setLeadersPage] = useState<number>(1);
+  const [leadersItemsPerPage, setLeadersItemsPerPage] = useState<number>(3);
+  
+  const [leaderboardPage, setLeaderboardPage] = useState<number>(1);
+  const [leaderboardItemsPerPage, setLeaderboardItemsPerPage] = useState<number>(10);
 
   // Pagination pages
   const [pjTablePage, setPjTablePage] = useState<number>(1);
@@ -689,25 +695,8 @@ export default function App() {
     });
     pplCount = activePpls.length;
 
-    // "Total Submit (Hari Ini / Filter) ambil data dari sheet rekap harian"
-    let totalDailySubmit = 0;
-    let totalDailyTotal = 0;
-
-    const dailyFiltered = table3Calculated.filter(rec => {
-      if (selectedPml !== 'ALL' && rec.pmlName !== selectedPml) return false;
-      if (selectedPpl !== 'ALL' && rec.pplName !== selectedPpl) return false;
-      if (selectedDate !== 'ALL' && rec.dateStr !== selectedDate) return false;
-      return true;
-    });
-
-    dailyFiltered.forEach(rec => {
-      totalDailySubmit += rec.dailySubmit;
-      totalDailyTotal += rec.dailyTotal;
-    });
-
-    // "Total Draft (Hari Ini) ambil data dari sheet rekap harian"
-    // Find the date for the draft calculation
-    const activeDraftDate = selectedDate === 'ALL' ? (
+    // Find the active date for both Daily Submit and Draft (latest if ALL)
+    const activeDailyDate = selectedDate === 'ALL' ? (
       table3Calculated.length > 0 ? (() => {
         let maxTime = -1;
         let maxStr = '';
@@ -722,12 +711,31 @@ export default function App() {
       })() : ''
     ) : selectedDate;
 
+    // "Total Submit (Hari Ini / Filter) ambil data dari sheet rekap harian"
+    let totalDailySubmit = 0;
+    let totalDailyTotal = 0;
+
+    if (activeDailyDate) {
+      const dailyFiltered = table3Calculated.filter(rec => {
+        if (selectedPml !== 'ALL' && rec.pmlName !== selectedPml) return false;
+        if (selectedPpl !== 'ALL' && rec.pplName !== selectedPpl) return false;
+        if (rec.dateStr !== activeDailyDate) return false;
+        return true;
+      });
+
+      dailyFiltered.forEach(rec => {
+        totalDailySubmit += rec.dailySubmit;
+        totalDailyTotal += rec.dailyTotal;
+      });
+    }
+
+    // "Total Draft (Hari Ini) ambil data dari sheet rekap harian"
     let totalDailyDraft = 0;
-    if (activeDraftDate) {
+    if (activeDailyDate) {
       const dailyDraftFiltered = table3Calculated.filter(rec => {
         if (selectedPml !== 'ALL' && rec.pmlName !== selectedPml) return false;
         if (selectedPpl !== 'ALL' && rec.pplName !== selectedPpl) return false;
-        if (rec.dateStr !== activeDraftDate) return false;
+        if (rec.dateStr !== activeDailyDate) return false;
         return true;
       });
       dailyDraftFiltered.forEach(rec => {
@@ -773,7 +781,6 @@ export default function App() {
     };
   }, [parsedData.table1]);
 
-  // Chart data: Tren harian grouped by date
   // "Tren Progres Harian (Non-Akumulasi) ambil data dari sheet rekap harian"
   const trendChartData = useMemo(() => {
     const dates: Record<string, { dateStr: string; dateObj: Date; SUBMIT: number; DRAFT: number }> = {};
@@ -865,6 +872,11 @@ export default function App() {
       p.pmlName.toLowerCase().includes(query)
     );
   }, [sortedLeaders, localPplFilter]);
+
+  const paginatedLeaders = useMemo(() => {
+    const startIndex = (leadersPage - 1) * leadersItemsPerPage;
+    return filteredLeaders.slice(startIndex, startIndex + leadersItemsPerPage);
+  }, [filteredLeaders, leadersPage, leadersItemsPerPage]);
 
   // Live PPL sidebar list stats representation - sorted by average daily submits
   const livePplList = useMemo(() => {
@@ -1088,36 +1100,39 @@ export default function App() {
     return parseRekapMempawahCSV(rekapMempawahCSV);
   }, [rekapMempawahCSV]);
 
-  // GC PBI target summary
-  const gcPbiStats = useMemo(() => {
-    let completed = 0;
-    let inProgress = 0;
-    let notStarted = 0;
-    let totalSls = 0;
-
+  // Chart data: Geo progress grouped by kecamatan or desa
+  const geoChartData = useMemo(() => {
+    const dataMap = new Map<string, { name: string, SUBMIT: number, DRAFT: number, total: number, target: number }>();
+    
     parsedMempawahRecords.forEach(rec => {
-      if (rec.targetPbi > 0) {
-        totalSls++;
-        if (rec.submit >= rec.target) {
-          completed++;
-        } else if (rec.submit > 0 || rec.draft > 0) {
-          inProgress++;
-        } else {
-          notStarted++;
-        }
+      // Global filters
+      if (selectedPml !== 'ALL' && rec.pmlName !== selectedPml) return;
+      if (selectedPpl !== 'ALL' && rec.pplName !== selectedPpl) return;
+
+      if (geoChartLevel === 'desa' && geoChartKecFilter !== 'ALL' && rec.kecamatan !== geoChartKecFilter) return;
+
+      const key = geoChartLevel === 'kecamatan' ? rec.kecamatan : rec.desa;
+      if (!key) return;
+      
+      if (!dataMap.has(key)) {
+        dataMap.set(key, { name: key, SUBMIT: 0, DRAFT: 0, total: 0, target: 0 });
       }
+      
+      const item = dataMap.get(key)!;
+      item.SUBMIT += rec.submit;
+      item.DRAFT += rec.draft;
+      item.total += rec.total;
+      item.target += rec.target;
     });
 
-    return {
-      total: totalSls,
-      completed,
-      inProgress,
-      notStarted,
-      completedPct: totalSls > 0 ? (completed / totalSls * 100).toFixed(1) : '0',
-      inProgressPct: totalSls > 0 ? (inProgress / totalSls * 100).toFixed(1) : '0',
-      notStartedPct: totalSls > 0 ? (notStarted / totalSls * 100).toFixed(1) : '0'
-    };
-  }, [parsedMempawahRecords]);
+    const arr = Array.from(dataMap.values());
+    if (geoChartLevel === 'desa') {
+      return arr.sort((a, b) => (b.SUBMIT / (b.target || 1)) - (a.SUBMIT / (a.target || 1))).slice(0, 5);
+    } else {
+      return arr.sort((a, b) => b.total - a.total).slice(0, 15);
+    }
+  }, [parsedMempawahRecords, selectedPml, selectedPpl, geoChartLevel, geoChartKecFilter]);
+
 
   // Unique filters for Rekap Mempawah
   const mempawahFilters = useMemo(() => {
@@ -1158,11 +1173,11 @@ export default function App() {
       const matchDesa = selectedMempawahDesaFilter === 'ALL' || rec.desa === selectedMempawahDesaFilter;
       const matchKec = selectedMempawahKecFilter === 'ALL' || rec.kecamatan === selectedMempawahKecFilter;
       const matchSls = selectedMempawahSlsFilter === 'ALL' || rec.sls === selectedMempawahSlsFilter;
-      const matchPpl = selectedMempawahPplFilter === 'ALL' || rec.pplName === selectedMempawahPplFilter;
-      const matchPml = selectedMempawahPmlFilter === 'ALL' || rec.pmlName === selectedMempawahPmlFilter;
+      const matchPml = selectedPml === 'ALL' || rec.pmlName === selectedPml;
+      const matchPpl = selectedPpl === 'ALL' || rec.pplName === selectedPpl;
       const matchGcPbi = selectedMempawahGcPbiFilter === 'ALL' || 
                          (selectedMempawahGcPbiFilter === 'ADA' ? rec.targetPbi > 0 : rec.targetPbi === 0);
-      return matchPj && matchDesa && matchKec && matchSls && matchPpl && matchPml && matchGcPbi;
+      return matchPj && matchDesa && matchKec && matchSls && matchPml && matchPpl && matchGcPbi;
     });
 
     records = [...records].sort((a, b) => {
@@ -1180,7 +1195,7 @@ export default function App() {
     });
 
     return records;
-  }, [parsedMempawahRecords, selectedMempawahPjFilter, selectedMempawahDesaFilter, selectedMempawahKecFilter, selectedMempawahSlsFilter, selectedMempawahPplFilter, selectedMempawahPmlFilter, selectedMempawahGcPbiFilter, mempawahSortColumn, mempawahSortDirection]);
+  }, [parsedMempawahRecords, selectedMempawahPjFilter, selectedMempawahDesaFilter, selectedMempawahKecFilter, selectedMempawahSlsFilter, selectedPml, selectedPpl, selectedMempawahGcPbiFilter, mempawahSortColumn, mempawahSortDirection]);
 
   const mempawahTotals = useMemo(() => {
     let submit = 0;
@@ -1200,6 +1215,55 @@ export default function App() {
     const progress = target > 0 ? parseFloat(((submit / target) * 100).toFixed(1)) : 0;
     return { submit, draft, total, target, targetPbi, open, progress };
   }, [filteredMempawahRecords]);
+
+  // Top dashboard SLS monitoring stats (All SLS + GC PBI) filtered by global PML and PPL
+  const topDashboardSlsStats = useMemo(() => {
+    let allSls = { completed: 0, inProgress: 0, notStarted: 0, total: 0 };
+    let gcPbi = { completed: 0, inProgress: 0, notStarted: 0, total: 0 };
+
+    parsedMempawahRecords.forEach(rec => {
+      // Apply global filters
+      if (selectedPml !== 'ALL' && rec.pmlName !== selectedPml) return;
+      if (selectedPpl !== 'ALL' && rec.pplName !== selectedPpl) return;
+
+      // All SLS
+      allSls.total++;
+      if (rec.submit >= rec.target && rec.target > 0) {
+        allSls.completed++;
+      } else if (rec.submit > 0 || rec.draft > 0) {
+        allSls.inProgress++;
+      } else {
+        allSls.notStarted++;
+      }
+
+      // GC PBI
+      if (rec.targetPbi > 0) {
+        gcPbi.total++;
+        if (rec.submit >= rec.target && rec.target > 0) {
+          gcPbi.completed++;
+        } else if (rec.submit > 0 || rec.draft > 0) {
+          gcPbi.inProgress++;
+        } else {
+          gcPbi.notStarted++;
+        }
+      }
+    });
+
+    return {
+      allSls: {
+        ...allSls,
+        completedPct: allSls.total > 0 ? (allSls.completed / allSls.total * 100).toFixed(1) : '0',
+        inProgressPct: allSls.total > 0 ? (allSls.inProgress / allSls.total * 100).toFixed(1) : '0',
+        notStartedPct: allSls.total > 0 ? (allSls.notStarted / allSls.total * 100).toFixed(1) : '0'
+      },
+      gcPbi: {
+        ...gcPbi,
+        completedPct: gcPbi.total > 0 ? (gcPbi.completed / gcPbi.total * 100).toFixed(1) : '0',
+        inProgressPct: gcPbi.total > 0 ? (gcPbi.inProgress / gcPbi.total * 100).toFixed(1) : '0',
+        notStartedPct: gcPbi.total > 0 ? (gcPbi.notStarted / gcPbi.total * 100).toFixed(1) : '0'
+      }
+    };
+  }, [parsedMempawahRecords, selectedPml, selectedPpl]);
 
   // Mempawah Table pagination
   const MEMPAWAH_ITEMS_PER_PAGE = 10;
@@ -1564,6 +1628,11 @@ export default function App() {
     return leaderboardTab === 'most' ? leaderboardList.mostProductive : leaderboardList.leastProductive;
   }, [leaderboardList, leaderboardTab]);
 
+  const paginatedLeaderboard = useMemo(() => {
+    const startIndex = (leaderboardPage - 1) * leaderboardItemsPerPage;
+    return activeLeaderboard.slice(startIndex, startIndex + leaderboardItemsPerPage);
+  }, [activeLeaderboard, leaderboardPage, leaderboardItemsPerPage]);
+
   const handleBottomTableSort = (key: string) => {
     let direction: 'asc' | 'desc' | null = 'desc';
     if (bottomTableSortConfig.key === key) {
@@ -1678,28 +1747,30 @@ export default function App() {
               <Filter size={11} /> Filter:
             </span>
 
-            <select 
-              value={selectedPml} 
-              onChange={handlePmlChange}
-              className="bg-white border border-slate-300 rounded px-1.5 py-1 sm:px-2 sm:py-1 text-xs outline-hidden font-medium text-slate-700 cursor-pointer hover:border-slate-400"
-            >
-              <option value="ALL">PML: Semua Tim</option>
-              {parsedData.pmlList.map(pml => (
-                <option key={pml} value={pml}>{`PML: ${pml}`}</option>
-              ))}
-            </select>
+            <div className="w-40 xl:w-48 relative">
+              <SearchableSelect 
+                value={selectedPml} 
+                onChange={(val) => handlePmlChange({ target: { value: val } } as any)}
+                placeholder="PML: Semua Tim"
+                options={[
+                  { label: "PML: Semua Tim", value: "ALL" },
+                  ...parsedData.pmlList.map(pml => ({ label: `PML: ${pml}`, value: pml }))
+                ]}
+              />
+            </div>
 
             {/* PPL Selector */}
-            <select
-              value={selectedPpl}
-              onChange={(e) => setSelectedPpl(e.target.value)}
-              className={`${isMobileFilterOpen ? 'block' : 'hidden'} xl:block bg-slate-50 border border-slate-300 rounded px-1.5 py-1 sm:px-2 sm:py-1 text-xs outline-hidden font-medium text-slate-700 cursor-pointer hover:border-slate-400`}
-            >
-              <option value="ALL">Semua PPL</option>
-              {filteredPplList.map(p => (
-                <option key={p.name} value={p.name}>{p.name}</option>
-              ))}
-            </select>
+            <div className={`w-40 xl:w-48 relative ${isMobileFilterOpen ? 'block' : 'hidden'} xl:block`}>
+              <SearchableSelect
+                value={selectedPpl}
+                onChange={(val) => setSelectedPpl(val)}
+                placeholder="Semua PPL"
+                options={[
+                  { label: "Semua PPL", value: "ALL" },
+                  ...filteredPplList.map(p => ({ label: p.name, value: p.name }))
+                ]}
+              />
+            </div>
 
             {/* Date Selector */}
             <select
@@ -1781,7 +1852,7 @@ export default function App() {
 
 
         {/* KPI Bar */}
-        <div className="col-span-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="col-span-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           
           {/* Card 1: Total Submit */}
           <div className="bg-white p-3 rounded-lg border border-slate-200 flex flex-col justify-between shadow-2xs h-24">
@@ -1791,6 +1862,9 @@ export default function App() {
                 {metricsKPIs.dailySubmit >= 0 ? `+${metricsKPIs.dailySubmit}` : metricsKPIs.dailySubmit}
               </span>
               <span className="text-[11px] text-slate-400 font-medium">berkas dari {metricsKPIs.pplCount} PPL</span>
+              <span className="text-[10px] text-green-700 bg-green-50 px-1 py-0.5 rounded ml-auto font-bold border border-green-200">
+                {metricsKPIs.cumMempawahTarget > 0 ? ((metricsKPIs.dailySubmit / metricsKPIs.cumMempawahTarget) * 100).toFixed(2) : '0'}%
+              </span>
             </div>
             <div className="text-[10px] text-slate-400 font-semibold uppercase flex items-center gap-1 mt-1">
               <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span> Kontribusi Bersih Harian
@@ -1803,6 +1877,9 @@ export default function App() {
             <div className="flex items-baseline gap-2 mt-1">
               <span className="text-2xl font-black text-amber-500">{metricsKPIs.cumDraft}</span>
               <span className="text-[11px] text-slate-400 font-medium">perlu re-review</span>
+              <span className="text-[10px] text-amber-700 bg-amber-50 px-1 py-0.5 rounded ml-auto font-bold border border-amber-200">
+                {metricsKPIs.cumMempawahTarget > 0 ? ((metricsKPIs.cumDraft / metricsKPIs.cumMempawahTarget) * 100).toFixed(2) : '0'}%
+              </span>
             </div>
             <div className="text-[10px] text-slate-450 font-semibold flex items-center gap-1 mt-1 truncate">
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span> Diperbarui: {lastUpdate || '-'}
@@ -1826,37 +1903,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Card 4: SLS GC PBI Stats */}
-          <div className="bg-white p-3 rounded-lg border border-slate-200 flex flex-col justify-between shadow-2xs h-24 relative overflow-hidden group group-hover:overflow-visible">
-            <div className="flex justify-between items-center">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block truncate">Progres SLS GC PBI</span>
-              <span className="text-[8px] font-bold text-indigo-500 bg-indigo-50 px-1 rounded-sm">{gcPbiStats.total} SLS</span>
-            </div>
-            
-            <div className="flex items-center gap-1 mt-1 justify-between flex-1">
-              <div className="flex flex-col text-center w-1/3">
-                <span className="text-[9px] font-extrabold text-slate-400 truncate">SELESAI</span>
-                <span className="text-sm font-black text-emerald-600 leading-none mt-0.5">{gcPbiStats.completed}</span>
-                <span className="text-[8px] font-bold text-slate-500">{gcPbiStats.completedPct}%</span>
-              </div>
-              <div className="flex flex-col text-center w-1/3 border-x border-slate-100">
-                <span className="text-[9px] font-extrabold text-slate-400 truncate">PROSES</span>
-                <span className="text-sm font-black text-blue-600 leading-none mt-0.5">{gcPbiStats.inProgress}</span>
-                <span className="text-[8px] font-bold text-slate-500">{gcPbiStats.inProgressPct}%</span>
-              </div>
-              <div className="flex flex-col text-center w-1/3">
-                <span className="text-[9px] font-extrabold text-slate-400 truncate">BELUM</span>
-                <span className="text-sm font-black text-rose-500 leading-none mt-0.5">{gcPbiStats.notStarted}</span>
-                <span className="text-[8px] font-bold text-slate-500">{gcPbiStats.notStartedPct}%</span>
-              </div>
-            </div>
-            
-            <div className="absolute inset-x-0 bottom-0 translate-y-full group-hover:translate-y-0 transition-transform bg-slate-800/95 p-1.5 flex items-center justify-center z-10">
-              <span className="text-[9px] text-white text-center font-medium leading-tight">
-                *Ada 222 KK target GC PBI tidak diketahui lokasi SLS-nya (tersebar di seluruh SLS)
-              </span>
-            </div>
-          </div>
+
 
           {/* Card 5: Most Active Officer PPL */}
           <div className="bg-white p-3 rounded-lg border border-slate-200 flex flex-col justify-between shadow-2xs h-24">
@@ -1871,6 +1918,90 @@ export default function App() {
               </div>
             </div>
             <div className="text-[9px] text-indigo-500 font-bold uppercase tracking-wider mt-1">Productivity Winner</div>
+          </div>
+        </div>
+
+        {/* Monitoring SLS (Semua & GC PBI) */}
+        <div className="col-span-12 grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Semua SLS */}
+          <div className="p-3 bg-white border border-slate-200 rounded-xl flex items-center justify-between gap-4 flex-wrap shadow-xs">
+            <div className="flex flex-col">
+              <span className="text-xs font-black text-slate-700 uppercase tracking-tight flex items-center gap-1.5">
+                Monitoring Seluruh SLS (Mempawah)
+              </span>
+              <span className="text-[10px] text-slate-400 font-medium mt-0.5">
+                Statistik berdasarkan filter PML & PPL.
+              </span>
+            </div>
+            
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-100 p-2 rounded-lg flex-1 max-w-sm">
+              <div className="flex flex-col items-center justify-center px-2 border-r border-slate-200">
+                <span className="text-[9px] text-slate-400 font-extrabold">TOTAL</span>
+                <span className="text-base font-black text-slate-700 leading-none mt-0.5">{topDashboardSlsStats.allSls.total}</span>
+              </div>
+              <div className="flex flex-col items-center justify-center px-2 border-r border-slate-200 flex-1">
+                <span className="text-[9px] text-slate-400 font-extrabold">SELESAI</span>
+                <div className="flex items-end gap-1 mt-0.5">
+                  <span className="text-base font-black text-emerald-600 leading-none">{topDashboardSlsStats.allSls.completed}</span>
+                  <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 rounded">{topDashboardSlsStats.allSls.completedPct}%</span>
+                </div>
+              </div>
+              <div className="flex flex-col items-center justify-center px-2 border-r border-slate-200 flex-1">
+                <span className="text-[9px] text-slate-400 font-extrabold">PROSES</span>
+                <div className="flex items-end gap-1 mt-0.5">
+                  <span className="text-base font-black text-blue-600 leading-none">{topDashboardSlsStats.allSls.inProgress}</span>
+                  <span className="text-[9px] font-bold text-blue-700 bg-blue-50 px-1 rounded">{topDashboardSlsStats.allSls.inProgressPct}%</span>
+                </div>
+              </div>
+              <div className="flex flex-col items-center justify-center px-2 flex-1">
+                <span className="text-[9px] text-slate-400 font-extrabold">BELUM</span>
+                <div className="flex items-end gap-1 mt-0.5">
+                  <span className="text-base font-black text-rose-500 leading-none">{topDashboardSlsStats.allSls.notStarted}</span>
+                  <span className="text-[9px] font-bold text-rose-700 bg-rose-50 px-1 rounded">{topDashboardSlsStats.allSls.notStartedPct}%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* GC PBI SLS */}
+          <div className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl flex items-center justify-between gap-4 flex-wrap shadow-xs">
+            <div className="flex flex-col">
+              <span className="text-xs font-black text-indigo-700 uppercase tracking-tight flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
+                SLS Prioritas (Target GC PBI)
+              </span>
+              <span className="text-[10px] text-indigo-500/80 font-semibold mt-0.5">
+                *Ada 222 KK tersebar & tidak diketahui lokasinya.
+              </span>
+            </div>
+            
+            <div className="flex items-center gap-2 bg-white border border-indigo-100 p-2 rounded-lg shadow-3xs flex-1 max-w-sm">
+              <div className="flex flex-col items-center justify-center px-2 border-r border-slate-100">
+                <span className="text-[9px] text-slate-400 font-extrabold">TOTAL</span>
+                <span className="text-base font-black text-slate-700 leading-none mt-0.5">{topDashboardSlsStats.gcPbi.total}</span>
+              </div>
+              <div className="flex flex-col items-center justify-center px-2 border-r border-slate-100 flex-1">
+                <span className="text-[9px] text-slate-400 font-extrabold">SELESAI</span>
+                <div className="flex items-end gap-1 mt-0.5">
+                  <span className="text-base font-black text-emerald-600 leading-none">{topDashboardSlsStats.gcPbi.completed}</span>
+                  <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 rounded">{topDashboardSlsStats.gcPbi.completedPct}%</span>
+                </div>
+              </div>
+              <div className="flex flex-col items-center justify-center px-2 border-r border-slate-100 flex-1">
+                <span className="text-[9px] text-slate-400 font-extrabold">PROSES</span>
+                <div className="flex items-end gap-1 mt-0.5">
+                  <span className="text-base font-black text-blue-600 leading-none">{topDashboardSlsStats.gcPbi.inProgress}</span>
+                  <span className="text-[9px] font-bold text-blue-700 bg-blue-50 px-1 rounded">{topDashboardSlsStats.gcPbi.inProgressPct}%</span>
+                </div>
+              </div>
+              <div className="flex flex-col items-center justify-center px-2 flex-1">
+                <span className="text-[9px] text-slate-400 font-extrabold">BELUM</span>
+                <div className="flex items-end gap-1 mt-0.5">
+                  <span className="text-base font-black text-rose-500 leading-none">{topDashboardSlsStats.gcPbi.notStarted}</span>
+                  <span className="text-[9px] font-bold text-rose-700 bg-rose-50 px-1 rounded">{topDashboardSlsStats.gcPbi.notStartedPct}%</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -2205,8 +2336,8 @@ export default function App() {
 
             {/* Styled List element */}
             <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
-              {filteredLeaders.length > 0 ? (
-                filteredLeaders.map(ppl => (
+              {paginatedLeaders.length > 0 ? (
+                paginatedLeaders.map(ppl => (
                   <div key={ppl.name} className="p-2 bg-slate-50 border border-slate-100 rounded-md flex justify-between items-center text-xs hover:border-slate-300 transition-colors">
                     <div className="flex flex-col min-w-0 pr-2">
                       <span className="font-extrabold text-slate-800 truncate">{ppl.name}</span>
@@ -2224,6 +2355,42 @@ export default function App() {
                   <span>Tidak ada data pemimpin progres.</span>
                 </div>
               )}
+            </div>
+
+            {/* Pagination Controls for Bintang Progres */}
+            <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-100">
+              <div className="flex items-center gap-1 text-[10px]">
+                <span className="text-slate-500">Tampil:</span>
+                <select 
+                  className="bg-slate-50 border border-slate-200 rounded px-1 py-0.5 text-slate-700 font-bold outline-none"
+                  value={leadersItemsPerPage}
+                  onChange={(e) => {
+                    setLeadersItemsPerPage(Number(e.target.value));
+                    setLeadersPage(1);
+                  }}
+                >
+                  <option value={3}>3</option>
+                  <option value={5}>5</option>
+                  <option value={10}>10</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-1 text-[10px]">
+                <button
+                  disabled={leadersPage === 1}
+                  onClick={() => setLeadersPage(p => Math.max(1, p - 1))}
+                  className="px-2 py-0.5 rounded border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
+                >
+                  Prev
+                </button>
+                <span className="text-slate-500 font-bold px-1">{leadersPage} / {Math.max(1, Math.ceil(filteredLeaders.length / leadersItemsPerPage))}</span>
+                <button
+                  disabled={leadersPage >= Math.ceil(filteredLeaders.length / leadersItemsPerPage)}
+                  onClick={() => setLeadersPage(p => p + 1)}
+                  className="px-2 py-0.5 rounded border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
+                >
+                  Next
+                </button>
+              </div>
             </div>
           </div>
 
@@ -2257,15 +2424,16 @@ export default function App() {
             </div>
 
             <div className="flex-1 overflow-y-auto max-h-[500px] space-y-1.5 pr-1 scrollbar-thin">
-              {activeLeaderboard.length > 0 ? (
-                activeLeaderboard.map((item, idx) => {
+              {paginatedLeaderboard.length > 0 ? (
+                paginatedLeaderboard.map((item, idx) => {
+                  const actualIdx = (leaderboardPage - 1) * leaderboardItemsPerPage + idx;
                   const maxSubmitsAvg = Math.max(...leaderboardList.mostProductive.map(i => i.submitsAvg), 1);
                   const pct = Math.min((item.submitsAvg / maxSubmitsAvg) * 100, 100);
                   
                   return (
                     <div key={item.pplName} className="p-2 bg-slate-50 border border-slate-100 rounded-md flex items-center justify-between gap-3 text-xs hover:border-slate-200 transition-colors">
                       <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                        <span className="w-5 text-center font-mono font-bold text-slate-400">#{idx + 1}</span>
+                        <span className="w-5 text-center font-mono font-bold text-slate-400">#{actualIdx + 1}</span>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-baseline justify-between mb-1 gap-1">
                             <span className="font-extrabold text-slate-800 truncate">{item.pplName}</span>
@@ -2295,58 +2463,200 @@ export default function App() {
                 </div>
               )}
             </div>
-          </div>
-        </div>
 
-        {/* Mid Section: Full-width Charts */}
-        <div className="col-span-12 bg-white p-4 rounded-lg border border-slate-200 flex flex-col shadow-2xs min-h-[360px]">
-          <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-100">
-            <h2 className="text-xs sm:text-sm font-bold flex items-center gap-2 text-slate-800">
-              <span className="w-1.5 h-4 bg-blue-600 rounded-full"></span>
-              Tren Progres Harian (Non-Akumulasi)
-            </h2>
-            <div className="flex gap-4 text-[10px] font-bold text-slate-500">
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 bg-green-500 rounded-xs"></span> SUBMIT
+            {/* Pagination Controls for Leaderboard */}
+            <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-100">
+              <div className="flex items-center gap-1 text-[10px]">
+                <span className="text-slate-500">Tampil:</span>
+                <select 
+                  className="bg-slate-50 border border-slate-200 rounded px-1 py-0.5 text-slate-700 font-bold outline-none"
+                  value={leaderboardItemsPerPage}
+                  onChange={(e) => {
+                    setLeaderboardItemsPerPage(Number(e.target.value));
+                    setLeaderboardPage(1);
+                  }}
+                >
+                  <option value={5}>5</option>
+                  <option value={10}>10</option>
+                  <option value={20}>20</option>
+                  <option value={50}>50</option>
+                </select>
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 bg-amber-400 rounded-xs"></span> DRAFT
+              <div className="flex items-center gap-1 text-[10px]">
+                <button
+                  disabled={leaderboardPage === 1}
+                  onClick={() => setLeaderboardPage(p => Math.max(1, p - 1))}
+                  className="px-2 py-0.5 rounded border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
+                >
+                  Prev
+                </button>
+                <span className="text-slate-500 font-bold px-1">{leaderboardPage} / {Math.max(1, Math.ceil(activeLeaderboard.length / leaderboardItemsPerPage))}</span>
+                <button
+                  disabled={leaderboardPage >= Math.ceil(activeLeaderboard.length / leaderboardItemsPerPage)}
+                  onClick={() => setLeaderboardPage(p => p + 1)}
+                  className="px-2 py-0.5 rounded border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 disabled:opacity-50 cursor-pointer"
+                >
+                  Next
+                </button>
               </div>
             </div>
           </div>
-          
-          {/* Visual Recharts Bar & Lines Chart */}
-          <div className="flex-1 min-h-[260px] w-full">
-            {trendChartData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <RechartsLineChart data={trendChartData} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis 
-                    dataKey="dateStr" 
-                    tick={{ fill: '#64748b', fontSize: 10, fontWeight: 'bold' }} 
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis 
-                    tick={{ fill: '#64748b', fontSize: 10 }} 
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: 'white', borderRadius: '6px', border: '1px solid #e2e8f0' }}
-                    labelStyle={{ fontWeight: 'bold', color: '#1e293b', fontSize: '11px' }}
-                  />
-                  <Legend verticalAlign="top" height={28} iconSize={8} wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} />
-                  <Line name="Submit Baru (Delta)" type="monotone" dataKey="SUBMIT" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                  <Line name="Draf Baru (Delta)" type="monotone" dataKey="DRAFT" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                </RechartsLineChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2.5">
-                <LucideLineChart size={32} className="text-slate-300" />
-                <p className="text-xs font-semibold">Tidak ada data tren dalam jangkauan filter.</p>
+        </div>
+
+        {/* Mid Section: Charts */}
+        <div className="col-span-12 grid grid-cols-1 lg:grid-cols-12 gap-4">
+          <div className="lg:col-span-7 bg-white p-4 rounded-lg border border-slate-200 flex flex-col shadow-2xs min-h-[360px]">
+            <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-100">
+              <h2 className="text-xs sm:text-sm font-bold flex items-center gap-2 text-slate-800">
+                <span className="w-1.5 h-4 bg-blue-600 rounded-full"></span>
+                Tren Progres Harian (Non-Akumulasi)
+              </h2>
+              <div className="flex gap-4 text-[10px] font-bold text-slate-500">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 bg-green-500 rounded-xs"></span> SUBMIT
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 bg-amber-400 rounded-xs"></span> DRAFT
+                </div>
               </div>
-            )}
+            </div>
+            
+            {/* Visual Recharts Bar & Lines Chart */}
+            <div className="flex-1 min-h-[260px] w-full">
+              {trendChartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <RechartsLineChart data={trendChartData} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis 
+                      dataKey="dateStr" 
+                      tick={{ fill: '#64748b', fontSize: 10, fontWeight: 'bold' }} 
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis 
+                      tick={{ fill: '#64748b', fontSize: 10 }} 
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: 'white', borderRadius: '6px', border: '1px solid #e2e8f0' }}
+                      labelStyle={{ fontWeight: 'bold', color: '#1e293b', fontSize: '11px' }}
+                    />
+                    <Legend verticalAlign="top" height={28} iconSize={8} wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} />
+                    <Line name="Submit Baru (Delta)" type="monotone" dataKey="SUBMIT" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                    <Line name="Draf Baru (Delta)" type="monotone" dataKey="DRAFT" stroke="#f59e0b" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                  </RechartsLineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2.5">
+                  <LucideLineChart size={32} className="text-slate-300" />
+                  <p className="text-xs font-semibold">Tidak ada data tren dalam jangkauan filter.</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="lg:col-span-5 bg-white p-4 rounded-lg border border-slate-200 flex flex-col shadow-2xs min-h-[360px]">
+            <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-100">
+              <h2 className="text-xs sm:text-sm font-bold flex items-center gap-2 text-slate-800">
+                <span className="w-1.5 h-4 bg-indigo-600 rounded-full"></span>
+                Progres Menurut Geografis
+              </h2>
+              <div className="flex items-center gap-2">
+                {geoChartLevel === 'desa' && (
+                  <select 
+                    className="text-[9px] font-bold rounded border border-slate-200 bg-white px-1.5 py-1 max-w-[120px] shadow-sm text-slate-600 outline-none focus:border-indigo-400"
+                    value={geoChartKecFilter}
+                    onChange={e => setGeoChartKecFilter(e.target.value)}
+                  >
+                    <option value="ALL">Semua Kec</option>
+                    {mempawahFilters.kecamatans.map(k => (
+                      <option key={k} value={k}>{k}</option>
+                    ))}
+                  </select>
+                )}
+                <div className="flex bg-slate-100 rounded p-0.5">
+                  <button
+                    onClick={() => setGeoChartLevel('kecamatan')}
+                    className={`px-2 py-1 text-[9px] font-bold rounded transition-colors ${geoChartLevel === 'kecamatan' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    KECAMATAN
+                  </button>
+                  <button
+                    onClick={() => setGeoChartLevel('desa')}
+                    className={`px-2 py-1 text-[9px] font-bold rounded transition-colors ${geoChartLevel === 'desa' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    DESA
+                  </button>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex-1 min-h-[260px] w-full">
+              {geoChartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={geoChartData} layout="vertical" margin={{ top: 5, right: 10, left: 30, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                    <XAxis type="number" hide />
+                    <YAxis 
+                      type="category" 
+                      dataKey="name" 
+                      tick={{ fill: '#64748b', fontSize: 9, fontWeight: 'bold' }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={80}
+                    />
+                    <Tooltip 
+                      cursor={{fill: '#f8fafc'}}
+                      content={({ active, payload, label }: any) => {
+                        if (active && payload && payload.length) {
+                          const data = payload[0].payload;
+                          const target = data.target || 1;
+                          const submit = data.SUBMIT || 0;
+                          const draft = data.DRAFT || 0;
+                          const unsent = Math.max(0, target - (submit + draft));
+                          
+                          const pSubmit = ((submit / target) * 100).toFixed(1);
+                          const pDraft = ((draft / target) * 100).toFixed(1);
+                          const pUnsent = ((unsent / target) * 100).toFixed(1);
+
+                          return (
+                            <div className="bg-white p-2 border border-slate-200 rounded-md shadow-lg text-xs min-w-[150px] z-50 relative">
+                              <p className="font-bold border-b border-slate-100 pb-1 mb-1">{label}</p>
+                              <div className="flex justify-between items-center text-slate-500 mb-1 text-[10px]">
+                                <span>Target:</span>
+                                <span className="font-bold text-slate-700">{target}</span>
+                              </div>
+                              <div className="flex justify-between items-center text-emerald-600 mb-1 text-[10px]">
+                                <span>Submit:</span>
+                                <span className="font-bold">{submit} <span className="text-[9px] bg-emerald-50 px-1 rounded ml-1 font-bold">({pSubmit}%)</span></span>
+                              </div>
+                              <div className="flex justify-between items-center text-amber-500 mb-1 text-[10px]">
+                                <span>Draft:</span>
+                                <span className="font-bold">{draft} <span className="text-[9px] bg-amber-50 px-1 rounded ml-1 font-bold">({pDraft}%)</span></span>
+                              </div>
+                              <div className="flex justify-between items-center text-rose-500 text-[10px]">
+                                <span>Belum:</span>
+                                <span className="font-bold">{unsent} <span className="text-[9px] bg-rose-50 px-1 rounded ml-1 font-bold">({pUnsent}%)</span></span>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Legend verticalAlign="top" height={28} iconSize={8} wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} />
+                    <Bar name="Submit" dataKey="SUBMIT" stackId="a" fill="#10b981" radius={[0, 0, 0, 0]} barSize={12} />
+                    <Bar name="Draft" dataKey="DRAFT" stackId="a" fill="#f59e0b" radius={[0, 4, 4, 0]} barSize={12} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2.5">
+                  <LucideLineChart size={32} className="text-slate-300" />
+                  <p className="text-xs font-semibold">Tidak ada data geografis.</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -2754,7 +3064,7 @@ export default function App() {
             </div>
             
             {/* Multiple Filters Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-7 gap-3 mt-4 pt-4 border-t border-slate-200/60">
+            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-3 mt-4 pt-4 border-t border-slate-200/60">
               {/* PJ filter */}
               <div className="flex flex-col gap-1">
                 <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wide">Filter PJ:</span>
@@ -2820,33 +3130,6 @@ export default function App() {
                 />
               </div>
 
-              {/* PPL filter */}
-              <div className="flex flex-col gap-1">
-                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wide">Filter PPL:</span>
-                <SearchableSelect
-                  value={selectedMempawahPplFilter}
-                  onChange={(val) => { setSelectedMempawahPplFilter(val); setMempawahTablePage(1); }}
-                  placeholder="Pilih PPL..."
-                  options={[
-                    { label: "Semua PPL", value: "ALL" },
-                    ...mempawahFilters.ppls.map(ppl => ({ label: ppl, value: ppl }))
-                  ]}
-                />
-              </div>
-
-              {/* PML filter */}
-              <div className="flex flex-col gap-1">
-                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wide">Filter PML:</span>
-                <SearchableSelect
-                  value={selectedMempawahPmlFilter}
-                  onChange={(val) => { setSelectedMempawahPmlFilter(val); setMempawahTablePage(1); }}
-                  placeholder="Pilih PML..."
-                  options={[
-                    { label: "Semua PML", value: "ALL" },
-                    ...mempawahFilters.pmls.map(pml => ({ label: pml, value: pml }))
-                  ]}
-                />
-              </div>
 
               {/* Target GC PBI filter */}
               <div className="flex flex-col gap-1">
@@ -2892,6 +3175,8 @@ export default function App() {
               <span className="text-sm font-black text-emerald-600 font-mono">{mempawahTotals.progress}%</span>
             </div>
           </div>
+
+
 
           <div className="overflow-x-auto">
             <table className="w-full text-[11px] text-left border-collapse">
