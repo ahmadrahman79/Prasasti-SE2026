@@ -148,13 +148,6 @@ export function parseNewSheetsData(
 
   // 2. Parse rekap (holds active day's entries)
   const rekapLines = rekapCSV.split(/\r?\n/);
-  for (let i = 1; i < rekapLines.length; i++) {
-    const line = rekapLines[i].trim();
-    if (!line) continue;
-    
-    const rawCols = parseCSVLine(line);
-    const cols = rawCols.map(c => c.replace(/^"|"$/g, '').trim());
-    
     // Ensure matching column indices:
     // Kolom A (index 0): Nama PML
     // Kolom B (index 1): Nama PPL
@@ -162,6 +155,18 @@ export function parseNewSheetsData(
     // Kolom D (index 3): Draf
     // Kolom E (index 4): Total
     // Kolom F (index 5): Target
+    
+  const rekapHeaders = parseCSVLine(rekapLines[0] || '').map(c => c.replace(/^"|"$/g, '').trim().toLowerCase());
+  const idxApprovedPml = rekapHeaders.findIndex(h => h.includes('approv'));
+  const idxRejectedPml = rekapHeaders.findIndex(h => h.includes('reject'));
+
+  for (let i = 1; i < rekapLines.length; i++) {
+    const line = rekapLines[i].trim();
+    if (!line) continue;
+    
+    const rawCols = parseCSVLine(line);
+    const cols = rawCols.map(c => c.replace(/^"|"$/g, '').trim());
+
     if (cols.length >= 5 && cols[0] && cols[0] !== 'Nama PML' && cols[1]) {
       let pmlName = cols[0]; // Kolom A
       let pplName = cols[1]; // Kolom B
@@ -174,9 +179,12 @@ export function parseNewSheetsData(
       const mempawahTargetValue = cols[5] ? (parseInt(cols[5], 10) || 0) : 0; // Kolom F
       const mempawahTarget = mempawahTargetValue > 0 ? mempawahTargetValue : total;
       
+      const approvedPml = idxApprovedPml !== -1 && cols[idxApprovedPml] ? (parseInt(cols[idxApprovedPml], 10) || 0) : 0;
+      const rejectedPml = idxRejectedPml !== -1 && cols[idxRejectedPml] ? (parseInt(cols[idxRejectedPml], 10) || 0) : 0;
+      
       const disambiguatedName = getDisambiguatedPplName(pplName, pmlName);
       
-      table1.push({ pmlName, pplName: disambiguatedName, submit, draft, total, mempawahTarget });
+      table1.push({ pmlName, pplName: disambiguatedName, submit, draft, total, mempawahTarget, approvedPml, rejectedPml });
       
       // Add active dynamic snapshot to chronological log
       table3.push({
@@ -186,6 +194,8 @@ export function parseNewSheetsData(
         draft,
         total,
         mempawahTarget,
+        approvedPml,
+        rejectedPml,
         dateStr: activeWIBDateStr,
         date: parseIndonesianDate(activeWIBDateStr)
       });
@@ -200,6 +210,10 @@ export function parseNewSheetsData(
   
   // 3. Parse data lama (history archive data logs)
   const dataLamaLines = dataLamaCSV.split(/\r?\n/);
+  const dataLamaHeaders = parseCSVLine(dataLamaLines[0] || '').map(c => c.replace(/^"|"$/g, '').trim().toLowerCase());
+  const idxApprovLama = dataLamaHeaders.findIndex(h => h.includes('approv'));
+  const idxRejectLama = dataLamaHeaders.findIndex(h => h.includes('reject'));
+
   for (let i = 1; i < dataLamaLines.length; i++) {
     const line = dataLamaLines[i].trim();
     if (!line) continue;
@@ -217,6 +231,8 @@ export function parseNewSheetsData(
       const draft = parseInt(cols[3], 10) || 0;
       const total = parseInt(cols[4], 10) || 0;
       const dateStr = cols[5];
+      const approvedPml = idxApprovLama !== -1 && cols[idxApprovLama] ? (parseInt(cols[idxApprovLama], 10) || 0) : 0;
+      const rejectedPml = idxRejectLama !== -1 && cols[idxRejectLama] ? (parseInt(cols[idxRejectLama], 10) || 0) : 0;
       
       const disambiguatedName = getDisambiguatedPplName(pplName, pmlName);
       
@@ -232,6 +248,8 @@ export function parseNewSheetsData(
           draft,
           total,
           mempawahTarget,
+          approvedPml,
+          rejectedPml,
           dateStr,
           date: parseIndonesianDate(dateStr)
         });
@@ -296,22 +314,26 @@ export function parseNewSheetsData(
         }
       }
       
-      let submit = 0, draft = 0, total = 0, mempawahTarget = 0, pmlName = "";
+      let submit = 0, draft = 0, total = 0, mempawahTarget = 0, pmlName = "", approvedPml = 0, rejectedPml = 0;
       if (currentCumulativeRecord) {
         submit = currentCumulativeRecord.submit;
         draft = currentCumulativeRecord.draft;
         total = currentCumulativeRecord.total;
-        mempawahTarget = currentCumulativeRecord.mempawahTarget;
+        mempawahTarget = currentCumulativeRecord.mempawahTarget || 0;
         pmlName = currentCumulativeRecord.pmlName;
+        approvedPml = currentCumulativeRecord.approvedPml || 0;
+        rejectedPml = currentCumulativeRecord.rejectedPml || 0;
       } else if (records.length > 0) {
         // If we haven't reached the first record yet, use the first record's static data but 0 progress
-        mempawahTarget = records[0].mempawahTarget;
+        mempawahTarget = records[0].mempawahTarget || 0;
         pmlName = records[0].pmlName;
       }
       
       let dailySubmit = 0;
       let dailyDraft = 0;
       let dailyTotal = 0;
+      let dailyApprovedPml = 0;
+      let dailyRejectedPml = 0;
       let isFirstDay = false;
       
       if (i === 0) {
@@ -319,12 +341,16 @@ export function parseNewSheetsData(
         dailySubmit = submit;
         dailyDraft = draft;
         dailyTotal = total;
+        dailyApprovedPml = approvedPml;
+        dailyRejectedPml = rejectedPml;
         isFirstDay = true;
       } else {
         // For subsequent days, subtract the previous day's cumulative progress
         dailySubmit = Math.max(0, submit - prevDailyCumulative.submit);
         dailyDraft = Math.max(0, draft - prevDailyCumulative.draft);
         dailyTotal = Math.max(0, total - prevDailyCumulative.total);
+        dailyApprovedPml = Math.max(0, approvedPml - (prevDailyCumulative.approvedPml || 0));
+        dailyRejectedPml = Math.max(0, rejectedPml - (prevDailyCumulative.rejectedPml || 0));
         isFirstDay = false;
       }
       
@@ -338,15 +364,19 @@ export function parseNewSheetsData(
           submit,
           draft,
           total,
+          approvedPml,
+          rejectedPml,
           dailySubmit,
           dailyDraft,
           dailyTotal,
+          dailyApprovedPml,
+          dailyRejectedPml,
           isFirstDay
         });
       }
       
       // Update for the next iteration
-      prevDailyCumulative = { submit, draft, total };
+      prevDailyCumulative = { submit, draft, total, approvedPml, rejectedPml } as any;
       lastCumulativeRecord = currentCumulativeRecord;
     }
   }
@@ -398,6 +428,8 @@ export interface RekapHarianRecord {
   draft: number;
   total: number;
   target: number;
+  approvedPml?: number;
+  rejectedPml?: number;
 }
 
 export function parseAnyDate(dateStr: string): Date {
@@ -420,6 +452,9 @@ export function getElapsedDaysFromStart(date: Date): number {
 export function parseRekapHarianCSV(csvText: string, globalDuplicatePpls?: Set<string>): PPLDailyProgress[] {
   const lines = csvText.split(/\r?\n/);
   const rawRecords: RekapHarianRecord[] = [];
+  const headers = parseCSVLine(lines[0] || '').map(c => c.replace(/^"|"$/g, '').trim().toLowerCase());
+  const idxApproved = headers.findIndex(h => h.includes('approv'));
+  const idxRejected = headers.findIndex(h => h.includes('reject'));
 
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -436,6 +471,8 @@ export function parseRekapHarianCSV(csvText: string, globalDuplicatePpls?: Set<s
     // Index 4: Draf
     // Index 5: Total
     // Index 6: Target
+    // Index 7: Approved PML ?
+    // Index 8: Rejected PML ?
     if (cols.length >= 6 && cols[0] && cols[0] !== 'Tanggal' && cols[2]) {
       const tanggal = cols[0];
       let pmlName = cols[1] === '#N/A' ? 'Belum Terpetakan' : cols[1];
@@ -444,8 +481,10 @@ export function parseRekapHarianCSV(csvText: string, globalDuplicatePpls?: Set<s
       const draft = parseInt(cols[4], 10) || 0;
       const total = parseInt(cols[5], 10) || 0;
       const target = parseInt(cols[6], 10) || total;
+      const approvedPml = idxApproved !== -1 && cols[idxApproved] ? (parseInt(cols[idxApproved], 10) || 0) : 0;
+      const rejectedPml = idxRejected !== -1 && cols[idxRejected] ? (parseInt(cols[idxRejected], 10) || 0) : 0;
 
-      rawRecords.push({ tanggal, pmlName, pplName, submit, draft, total, target });
+      rawRecords.push({ tanggal, pmlName, pplName, submit, draft, total, target, approvedPml, rejectedPml });
     }
   }
 
@@ -504,6 +543,8 @@ export function parseRekapHarianCSV(csvText: string, globalDuplicatePpls?: Set<s
       let dailySubmit = 0;
       let dailyDraft = 0;
       let dailyTotal = 0;
+      let dailyApprovedPml = 0;
+      let dailyRejectedPml = 0;
       let isFirstDay = true;
 
       if (index > 0) {
@@ -511,6 +552,8 @@ export function parseRekapHarianCSV(csvText: string, globalDuplicatePpls?: Set<s
         dailySubmit = Math.max(0, item.submit - prev.submit);
         dailyDraft = item.draft - prev.draft;
         dailyTotal = Math.max(0, item.total - prev.total);
+        dailyApprovedPml = Math.max(0, (item.approvedPml || 0) - (prev.approvedPml || 0));
+        dailyRejectedPml = Math.max(0, (item.rejectedPml || 0) - (prev.rejectedPml || 0));
         isFirstDay = false;
       } else {
         // First entry in our record
@@ -519,11 +562,15 @@ export function parseRekapHarianCSV(csvText: string, globalDuplicatePpls?: Set<s
           dailySubmit = item.submit;
           dailyDraft = item.draft;
           dailyTotal = item.total;
+          dailyApprovedPml = item.approvedPml || 0;
+          dailyRejectedPml = item.rejectedPml || 0;
         } else {
           // Estimate daily additions on the first recorded day to prevent huge artificial cumulative spikes
           dailySubmit = Math.round(item.submit / daysElapsed);
           dailyDraft = Math.round(item.draft / daysElapsed);
           dailyTotal = Math.round(item.total / daysElapsed);
+          dailyApprovedPml = Math.round((item.approvedPml || 0) / daysElapsed);
+          dailyRejectedPml = Math.round((item.rejectedPml || 0) / daysElapsed);
         }
         isFirstDay = true;
       }
@@ -537,9 +584,13 @@ export function parseRekapHarianCSV(csvText: string, globalDuplicatePpls?: Set<s
         submit: item.submit,
         draft: item.draft,
         total: item.total,
+        approvedPml: item.approvedPml,
+        rejectedPml: item.rejectedPml,
         dailySubmit,
         dailyDraft,
         dailyTotal,
+        dailyApprovedPml,
+        dailyRejectedPml,
         isFirstDay
       });
     });
@@ -567,8 +618,12 @@ export function parseProgresHarianCSV(csvText: string, globalDuplicatePpls: Set<
       const draft = parseInt(cols[4], 10) || 0;
       const total = parseInt(cols[5], 10) || 0;
       const target = parseInt(cols[6], 10) || total;
+      const idxApprov = cols.findIndex((_, idx) => lines[0].split(',')[idx]?.toLowerCase().includes('approv'));
+      const idxReject = cols.findIndex((_, idx) => lines[0].split(',')[idx]?.toLowerCase().includes('reject'));
+      const approvedPml = idxApprov !== -1 && cols[idxApprov] ? (parseInt(cols[idxApprov], 10) || 0) : 0;
+      const rejectedPml = idxReject !== -1 && cols[idxReject] ? (parseInt(cols[idxReject], 10) || 0) : 0;
 
-      rawRecords.push({ tanggal, pmlName, pplName, submit, draft, total, target });
+      rawRecords.push({ tanggal, pmlName, pplName, submit, draft, total, target, approvedPml, rejectedPml });
     }
   }
 
@@ -593,9 +648,13 @@ export function parseProgresHarianCSV(csvText: string, globalDuplicatePpls: Set<
       submit: 0,
       draft: 0,
       total: 0,
+      approvedPml: 0,
+      rejectedPml: 0,
       dailySubmit: r.submit,
       dailyDraft: r.draft,
       dailyTotal: r.total,
+      dailyApprovedPml: r.approvedPml || 0,
+      dailyRejectedPml: r.rejectedPml || 0,
       isFirstDay: false
     });
   });
@@ -623,6 +682,8 @@ export interface RekapMempawahRecord {
   target: number;
   targetPbi: number;
   open: number;
+  approvedPml?: number;
+  rejectedPml?: number;
 }
 
 export const FALLBACK_REKAP_MEMPAWA_CSV = `"Kecamatan","Desa","SLS","PJ","Nama PPL","Nama PML","Submit","Draf","Total","Target"
@@ -670,6 +731,8 @@ export function parseRekapMempawahCSV(csvText: string): RekapMempawahRecord[] {
   const idxTotal = findIndex(['total', 'total submit+draf', 'total submit + draf'], ['total', 'tot']);
   const idxTarget = findIndex(['target', 'muatan prelist', 'target muatan'], ['target', 'prelist', 'muatan']);
   const idxTargetPbi = findIndex(['jumlah target pbi', 'target pbi', 'pbi'], ['pbi']);
+  const idxApprovedPml = findIndex(['approved pml', 'approver pml', 'approved', 'approv'], ['approv']);
+  const idxRejectedPml = findIndex(['rejected pml', 'rejected', 'reject'], ['reject']);
 
   const records: RekapMempawahRecord[] = [];
   
@@ -693,6 +756,9 @@ export function parseRekapMempawahCSV(csvText: string): RekapMempawahRecord[] {
     const target = idxTarget !== -1 && cols[idxTarget] ? (parseInt(cols[idxTarget], 10) || 0) : total;
     const targetPbi = idxTargetPbi !== -1 && cols[idxTargetPbi] ? (parseInt(cols[idxTargetPbi], 10) || 0) : 0;
     
+    const approvedPml = idxApprovedPml !== -1 && cols[idxApprovedPml] ? (parseInt(cols[idxApprovedPml], 10) || 0) : 0;
+    const rejectedPml = idxRejectedPml !== -1 && cols[idxRejectedPml] ? (parseInt(cols[idxRejectedPml], 10) || 0) : 0;
+    
     if (kecamatan || desa || sls || pplName) {
       records.push({
         kecamatan,
@@ -706,6 +772,8 @@ export function parseRekapMempawahCSV(csvText: string): RekapMempawahRecord[] {
         total,
         target,
         targetPbi,
+        approvedPml,
+        rejectedPml,
         open: Math.max(0, target - (submit + draft))
       });
     }

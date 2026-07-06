@@ -5,6 +5,8 @@ export interface PPLSummary {
   draft: number;
   total: number;
   mempawahTarget?: number;
+  approvedPml?: number;
+  rejectedPml?: number;
 }
 
 export interface Table3Record {
@@ -16,12 +18,16 @@ export interface Table3Record {
   dateStr: string;   // e.g., "19 Juni 2026"
   date: Date;        // parsed JavaScript Date object
   mempawahTarget?: number;
+  approvedPml?: number;
+  rejectedPml?: number;
 }
 
 export interface PPLDailyProgress extends Table3Record {
   dailySubmit: number; // submit - previous_submit
   dailyDraft: number;   // draft - previous_draft
   dailyTotal: number;   // total - previous_total
+  dailyApprovedPml?: number;
+  dailyRejectedPml?: number;
   isFirstDay: boolean;  // whether this is the first date entry for this PPL
 }
 
@@ -35,6 +41,8 @@ export interface Snapshot2359 {
   draft: number;
   total: number;
   mempawahTarget: number;
+  approvedPml?: number;
+  rejectedPml?: number;
   isAutoSaved: boolean;
 }
 

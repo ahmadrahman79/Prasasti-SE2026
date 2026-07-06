@@ -984,7 +984,7 @@ export default function App() {
 
   // PJ Table Records calculated from rekapCSV data (aggregated by PJ)
   const pjTableRecords = useMemo(() => {
-    const map = new Map<string, { pj: string; submit: number; draft: number; total: number; target: number; ppls: Set<string>; pmls: Set<string> }>();
+    const map = new Map<string, { pj: string; submit: number; draft: number; total: number; target: number; approvedPml: number; rejectedPml: number; ppls: Set<string>; pmls: Set<string> }>();
     
     parsedData.table1.forEach(ppl => {
       const pplKeyExact = ppl.pplName.trim().toLowerCase();
@@ -1027,12 +1027,14 @@ export default function App() {
         pj = pj.trim();
       }
       
-      const current = map.get(pj) || { pj, submit: 0, draft: 0, total: 0, target: 0, ppls: new Set<string>(), pmls: new Set<string>() };
+      const current = map.get(pj) || { pj, submit: 0, draft: 0, total: 0, target: 0, approvedPml: 0, rejectedPml: 0, ppls: new Set<string>(), pmls: new Set<string>() };
       
       current.submit += ppl.submit;
       current.draft += ppl.draft;
       current.total += ppl.total;
       current.target += ppl.mempawahTarget || ppl.total;
+      current.approvedPml += ppl.approvedPml || 0;
+      current.rejectedPml += ppl.rejectedPml || 0;
       current.ppls.add(ppl.pplName);
       current.pmls.add(ppl.pmlName);
       
@@ -1040,7 +1042,7 @@ export default function App() {
     });
     
     return Array.from(map.values()).map(r => ({
-      pj: r.pj, submit: r.submit, draft: r.draft, total: r.total, target: r.target,
+      pj: r.pj, submit: r.submit, draft: r.draft, total: r.total, target: r.target, approvedPml: r.approvedPml, rejectedPml: r.rejectedPml,
       pplCount: r.ppls.size, pmlCount: r.pmls.size
     })).sort((a, b) => a.pj.localeCompare(b.pj));
   }, [parsedData.table1, pplToPjFromRekapMap, pplToPjMap]);
@@ -1081,6 +1083,8 @@ export default function App() {
     let draft = 0;
     let total = 0;
     let target = 0;
+    let approvedPml = 0;
+    let rejectedPml = 0;
     let pplCount = 0;
     let pmlCount = 0;
     filteredPjRecords.forEach(rec => {
@@ -1088,11 +1092,13 @@ export default function App() {
       draft += rec.draft;
       total += rec.total;
       target += rec.target;
+      approvedPml += rec.approvedPml;
+      rejectedPml += rec.rejectedPml;
       pplCount += rec.pplCount;
       pmlCount += rec.pmlCount;
     });
     const progress = target > 0 ? parseFloat(((submit / target) * 100).toFixed(1)) : 0;
-    return { submit, draft, total, target, progress, pplCount, pmlCount };
+    return { submit, draft, total, target, approvedPml, rejectedPml, progress, pplCount, pmlCount };
   }, [filteredPjRecords]);
 
   // Rekap Mempawah Table parsed records
@@ -1204,6 +1210,8 @@ export default function App() {
     let target = 0;
     let targetPbi = 0;
     let open = 0;
+    let approvedPml = 0;
+    let rejectedPml = 0;
     filteredMempawahRecords.forEach(rec => {
       submit += rec.submit;
       draft += rec.draft;
@@ -1211,9 +1219,11 @@ export default function App() {
       target += rec.target;
       targetPbi += rec.targetPbi;
       open += rec.open;
+      approvedPml += rec.approvedPml || 0;
+      rejectedPml += rec.rejectedPml || 0;
     });
     const progress = target > 0 ? parseFloat(((submit / target) * 100).toFixed(1)) : 0;
-    return { submit, draft, total, target, targetPbi, open, progress };
+    return { submit, draft, total, target, targetPbi, open, progress, approvedPml, rejectedPml };
   }, [filteredMempawahRecords]);
 
   // Top dashboard SLS monitoring stats (All SLS + GC PBI) filtered by global PML and PPL
@@ -1292,7 +1302,7 @@ export default function App() {
     return res;
   }, [parsedMempawahRecords]);
 
-  type PMLGroupItem = { pplName: string; submit: number; draft: number; total: number; progress: number; mempawahTarget: number; slsCount: number; cumulativeTarget: number; open: number };
+  type PMLGroupItem = { pplName: string; submit: number; draft: number; total: number; progress: number; mempawahTarget: number; slsCount: number; cumulativeTarget: number; open: number; approvedPml: number; rejectedPml: number; };
 
   // Dynamic PML Groups for bottom recap comparison card tables
   const pmlGroups = useMemo<Record<string, PMLGroupItem[]>>(() => {
@@ -1315,7 +1325,9 @@ export default function App() {
         open: recMempawahTarget - (rec.submit + rec.draft),
         slsCount: pplSlsCounts[rec.pplName] || 0,
         cumulativeTarget: expectedCumulative,
-        progress: recMempawahTarget > 0 ? parseFloat(((rec.submit / recMempawahTarget) * 100).toFixed(1)) : 0
+        progress: recMempawahTarget > 0 ? parseFloat(((rec.submit / recMempawahTarget) * 100).toFixed(1)) : 0,
+        approvedPml: rec.approvedPml || 0,
+        rejectedPml: rec.rejectedPml || 0
       });
     });
 
@@ -1324,19 +1336,23 @@ export default function App() {
 
   // Calculate Sub Totals for each PML group
   const pmlSubTotals = useMemo(() => {
-    const totals: Record<string, { submit: number; draft: number; total: number; mempawahTarget: number; progress: number; open: number }> = {};
+    const totals: Record<string, { submit: number; draft: number; total: number; mempawahTarget: number; progress: number; open: number; approvedPml: number; rejectedPml: number }> = {};
     (Object.entries(pmlGroups) as [string, PMLGroupItem[]][]).forEach(([pmlName, list]) => {
       let subSubmit = 0;
       let subDraft = 0;
       let subTotal = 0;
       let subMempawahTarget = 0;
       let subOpen = 0;
+      let subApprovedPml = 0;
+      let subRejectedPml = 0;
       list.forEach(item => {
         subSubmit += item.submit;
         subDraft += item.draft;
         subTotal += item.total;
         subMempawahTarget += item.mempawahTarget || item.total;
         subOpen += item.open;
+        subApprovedPml += item.approvedPml;
+        subRejectedPml += item.rejectedPml;
       });
       totals[pmlName] = {
         submit: subSubmit,
@@ -1344,6 +1360,8 @@ export default function App() {
         total: subTotal,
         mempawahTarget: subMempawahTarget,
         open: subOpen,
+        approvedPml: subApprovedPml,
+        rejectedPml: subRejectedPml,
         progress: subMempawahTarget > 0 ? parseFloat(((subSubmit / subMempawahTarget) * 100).toFixed(1)) : 0
       };
     });
@@ -1352,7 +1370,7 @@ export default function App() {
 
   // Combine and sort data for the unified bottom table, filtered dynamically by selectedPml
   const bottomTableData = useMemo(() => {
-    const list: { pmlName: string; pplName: string; submit: number; draft: number; total: number; progress: number; mempawahTarget: number; open: number }[] = [];
+    const list: { pmlName: string; pplName: string; submit: number; draft: number; total: number; progress: number; mempawahTarget: number; open: number; approvedPml: number; rejectedPml: number; }[] = [];
     (Object.entries(pmlGroups) as [string, PMLGroupItem[]][]).forEach(([pmlName, ppls]) => {
       if (selectedPml !== 'ALL' && pmlName !== selectedPml) {
         return;
@@ -1387,7 +1405,7 @@ export default function App() {
 
   // Combine and sort data for the new Per PML table
   const pmlTableData = useMemo(() => {
-    const list: { pmlName: string; submit: number; draft: number; total: number; progress: number; mempawahTarget: number; open: number }[] = [];
+    const list: { pmlName: string; submit: number; draft: number; total: number; progress: number; mempawahTarget: number; open: number; approvedPml: number; rejectedPml: number }[] = [];
     (Object.entries(pmlSubTotals) as [string, any][]).forEach(([pmlName, totals]) => {
       if (selectedPml !== 'ALL' && pmlName !== selectedPml) {
         return;
@@ -1475,10 +1493,22 @@ export default function App() {
       dailyRequired: number;
       slsCount: number;
       cumulativeTarget: number;
+      approvedPml: number;
+      rejectedPml: number;
+      dailySubmit: number;
     }[] = [];
     
     const entries = Object.entries(pmlGroups) as [string, PMLGroupItem[]][];
     const remainingDays = getRemainingDaysToMempawahDeadline();
+    const activeWIBDate = getWIBTargetDateStr();
+    
+    // Create map for fast lookup of today's daily submit per PPL
+    const liveDailySubmits = new Map<string, number>();
+    table3Calculated.forEach(rec => {
+      if (rec.dateStr === activeWIBDate || rec.dateStr === `${activeWIBDate} (Live)`) {
+        liveDailySubmits.set(rec.pplName, rec.dailySubmit);
+      }
+    });
     
     entries.forEach(([pmlName, pplList]) => {
       if (selectedPml !== 'ALL' && pmlName !== selectedPml) return;
@@ -1498,13 +1528,16 @@ export default function App() {
           remainingTarget,
           dailyRequired,
           slsCount: p.slsCount,
-          cumulativeTarget: p.cumulativeTarget
+          cumulativeTarget: p.cumulativeTarget,
+          approvedPml: p.approvedPml || 0,
+          rejectedPml: p.rejectedPml || 0,
+          dailySubmit: liveDailySubmits.get(p.pplName) || 0
         });
       });
     });
     
     return list.sort((a, b) => b.dailyRequired - a.dailyRequired || a.pplName.localeCompare(b.pplName));
-  }, [pmlGroups, selectedPml]);
+  }, [pmlGroups, selectedPml, table3Calculated]);
 
   // Active PPLs list filtered by the tracker search queries
   const filteredTrackerPpls = useMemo(() => {
@@ -1529,18 +1562,26 @@ export default function App() {
 
   // Combined totals for the unified bottom table
   const bottomTableTotals = useMemo(() => {
-    let submit = 0;
-    let draft = 0;
-    let total = 0;
-    let mempawahTarget = 0;
+    let tSubmit = 0, tDraft = 0, tTotal = 0, tTarget = 0, tOpen = 0, tApprovedPml = 0, tRejectedPml = 0;
     bottomTableData.forEach(item => {
-      submit += item.submit;
-      draft += item.draft;
-      total += item.total;
-      mempawahTarget += item.mempawahTarget || item.total;
+      tSubmit += item.submit;
+      tDraft += item.draft;
+      tTotal += item.total;
+      tTarget += item.mempawahTarget;
+      tOpen += item.open;
+      tApprovedPml += item.approvedPml;
+      tRejectedPml += item.rejectedPml;
     });
-    const progress = mempawahTarget > 0 ? parseFloat(((submit / mempawahTarget) * 100).toFixed(1)) : 0;
-    return { submit, draft, total, mempawahTarget, progress };
+    return {
+      submit: tSubmit,
+      draft: tDraft,
+      total: tTotal,
+      mempawahTarget: tTarget,
+      open: tOpen,
+      approvedPml: tApprovedPml,
+      rejectedPml: tRejectedPml,
+      progress: tTarget > 0 ? parseFloat(((tSubmit / tTarget) * 100).toFixed(1)) : 0
+    };
   }, [bottomTableData]);
 
   // Find top star PPL for each PML team based on average daily submit
@@ -1847,10 +1888,6 @@ export default function App() {
       {/* Main Content Grid with dynamic layout spacing */}
       <main className="flex-1 p-4 grid grid-cols-12 gap-4">
 
-
-
-
-
         {/* KPI Bar */}
         <div className="col-span-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           
@@ -1876,7 +1913,9 @@ export default function App() {
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Total Draft (Saat Ini)</span>
             <div className="flex items-baseline gap-2 mt-1">
               <span className="text-2xl font-black text-amber-500">{metricsKPIs.cumDraft}</span>
-              <span className="text-[11px] text-slate-400 font-medium">perlu re-review</span>
+              <span className="text-[11px] font-bold text-amber-600 bg-amber-50 px-1 py-0.5 rounded">
+                {metricsKPIs.dailyDraft >= 0 ? `+${metricsKPIs.dailyDraft}` : metricsKPIs.dailyDraft} hari ini
+              </span>
               <span className="text-[10px] text-amber-700 bg-amber-50 px-1 py-0.5 rounded ml-auto font-bold border border-amber-200">
                 {metricsKPIs.cumMempawahTarget > 0 ? ((metricsKPIs.cumDraft / metricsKPIs.cumMempawahTarget) * 100).toFixed(2) : '0'}%
               </span>
@@ -1890,7 +1929,9 @@ export default function App() {
           <div className="bg-white p-3 rounded-lg border border-slate-200 flex flex-col justify-between shadow-2xs h-24">
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Akumulasi Progres Target</span>
             <div className="flex items-baseline justify-between mt-1">
-              <span className="text-xl font-black text-slate-800">{metricsKPIs.cumSubmit}</span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-xl font-black text-slate-800">{metricsKPIs.cumSubmit}</span>
+              </div>
               <span className="text-xs text-blue-600 font-extrabold bg-blue-50 px-1.5 py-0.5 rounded">
                 {metricsKPIs.cumMempawahTarget > 0 ? ((metricsKPIs.cumSubmit / metricsKPIs.cumMempawahTarget) * 100).toFixed(1) : '0'}% Selesai
               </span>
@@ -1902,8 +1943,6 @@ export default function App() {
               ></div>
             </div>
           </div>
-
-
 
           {/* Card 5: Most Active Officer PPL */}
           <div className="bg-white p-3 rounded-lg border border-slate-200 flex flex-col justify-between shadow-2xs h-24">
@@ -2145,15 +2184,31 @@ export default function App() {
                         </div>
                         <div className="bg-white p-1.5 border border-slate-150 shadow-3xs rounded-md min-w-0">
                           <div className="text-[7.5px] text-emerald-600 uppercase font-black tracking-tight leading-none truncate">Telah Submit</div>
-                          <div className="text-xs font-black text-emerald-600 font-mono mt-1">{ppl.submit}</div>
+                          <div className="text-xs font-black text-emerald-600 font-mono mt-1 flex items-center justify-center gap-1">
+                            {ppl.submit}
+                            <span className="text-[8.5px] bg-emerald-50 px-1 py-0.5 rounded text-emerald-700">({ppl.mempawahTarget > 0 ? ((ppl.submit / ppl.mempawahTarget) * 100).toFixed(1) : 0}%)</span>
+                          </div>
+                        </div>
+                        <div className="bg-white p-1.5 border border-slate-150 shadow-3xs rounded-md min-w-0 col-span-3 sm:col-span-1">
+                          <div className="text-[7.5px] text-green-600 uppercase font-bold tracking-tight leading-none truncate">Submit Hari Ini (Live)</div>
+                          <div className="text-xs font-black text-green-600 font-mono mt-1 flex items-center justify-center gap-1">
+                            {ppl.dailySubmit > 0 ? `+${ppl.dailySubmit}` : ppl.dailySubmit}
+                            <span className="text-[8.5px] bg-green-50 px-1 py-0.5 rounded text-green-700">({ppl.mempawahTarget > 0 ? ((ppl.dailySubmit / ppl.mempawahTarget) * 100).toFixed(1) : 0}%)</span>
+                          </div>
                         </div>
                         <div className="bg-white p-1.5 border border-slate-150 shadow-3xs rounded-md min-w-0">
                           <div className="text-[7.5px] text-amber-650 uppercase font-bold tracking-tight leading-none truncate">Jumlah Draf</div>
-                          <div className="text-xs font-black text-amber-500 font-mono mt-1">{ppl.draft}</div>
+                          <div className="text-xs font-black text-amber-500 font-mono mt-1 flex items-center justify-center gap-1">
+                            {ppl.draft}
+                            <span className="text-[8.5px] bg-amber-50 px-1 py-0.5 rounded text-amber-700">({ppl.mempawahTarget > 0 ? ((ppl.draft / ppl.mempawahTarget) * 100).toFixed(1) : 0}%)</span>
+                          </div>
                         </div>
                         <div className="bg-white p-1.5 border border-slate-150 shadow-3xs rounded-md min-w-0">
                           <div className="text-[7.5px] text-red-500 uppercase font-black tracking-tight leading-none truncate">Sisa Dokumen</div>
-                          <div className="text-xs font-black text-red-500 font-mono mt-1">{ppl.remainingTarget}</div>
+                          <div className="text-xs font-black text-red-500 font-mono mt-1 flex items-center justify-center gap-1">
+                            {ppl.remainingTarget}
+                            <span className="text-[8.5px] bg-red-50 px-1 py-0.5 rounded text-red-700">({ppl.mempawahTarget > 0 ? ((ppl.remainingTarget / ppl.mempawahTarget) * 100).toFixed(1) : 0}%)</span>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -2685,11 +2740,17 @@ export default function App() {
                   <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleBottomTableSort('submit')}>
                     Submit {renderSortIcon('submit')}
                   </th>
+                  <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleBottomTableSort('approvedPml')}>
+                    Approved PML {renderSortIcon('approvedPml')}
+                  </th>
+                  <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleBottomTableSort('rejectedPml')}>
+                    Rejected PML {renderSortIcon('rejectedPml')}
+                  </th>
                   <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleBottomTableSort('draft')}>
                     Draft {renderSortIcon('draft')}
                   </th>
                   <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleBottomTableSort('mempawahTarget')}>
-                    Target (Kolom F) {renderSortIcon('mempawahTarget')}
+                    Target {renderSortIcon('mempawahTarget')}
                   </th>
                   <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleBottomTableSort('open')}>
                     Open {renderSortIcon('open')}
@@ -2706,6 +2767,12 @@ export default function App() {
                       <td className="p-2.5 pl-4 font-sans font-bold text-slate-600">{ppl.pmlName}</td>
                       <td className="p-2.5 font-sans font-semibold text-slate-800">{ppl.pplName}</td>
                       <td className="p-2.5 text-center font-bold text-slate-800">{ppl.submit}</td>
+                      <td className="p-2.5 text-center font-bold text-green-600">
+                        {ppl.approvedPml}
+                        <br/>
+                        <span className="text-[9px] text-green-700">({ppl.mempawahTarget > 0 ? ((ppl.approvedPml / ppl.mempawahTarget) * 100).toFixed(1) : 0}%)</span>
+                      </td>
+                      <td className="p-2.5 text-center font-bold text-red-500">{ppl.rejectedPml}</td>
                       <td className="p-2.5 text-center text-slate-400">{ppl.draft}</td>
                       <td className="p-2.5 text-center">{ppl.mempawahTarget}</td>
                       <td className="p-2.5 text-center font-bold text-rose-500">{ppl.open}</td>
@@ -2724,7 +2791,7 @@ export default function App() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={6} className="p-8 text-center text-slate-400 font-sans">
+                    <td colSpan={9} className="p-8 text-center text-slate-400 font-sans">
                       Tidak ada data akumulasi petugas untuk filter PML terpilih.
                     </td>
                   </tr>
@@ -2737,6 +2804,12 @@ export default function App() {
                       TOTAL {selectedPml === 'ALL' ? 'TIM GABUNGAN' : `TIM ${selectedPml.toUpperCase()}`}
                     </td>
                     <td className="p-3 text-center font-black text-slate-800">{bottomTableTotals.submit}</td>
+                    <td className="p-3 text-center font-black text-green-600">
+                      {bottomTableTotals.approvedPml}
+                      <br/>
+                      <span className="text-[9px] text-green-700">({bottomTableTotals.mempawahTarget > 0 ? ((bottomTableTotals.approvedPml / bottomTableTotals.mempawahTarget) * 100).toFixed(1) : 0}%)</span>
+                    </td>
+                    <td className="p-3 text-center font-black text-red-500">{bottomTableTotals.rejectedPml}</td>
                     <td className="p-3 text-center font-black text-slate-400">{bottomTableTotals.draft}</td>
                     <td className="p-3 text-center text-slate-700 font-black">{bottomTableTotals.mempawahTarget}</td>
                     <td className="p-3 text-center text-rose-600 font-black">{bottomTableTotals.open}</td>
@@ -2800,6 +2873,12 @@ export default function App() {
                   <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handlePmlTableSort('submit')}>
                     Submit {renderPmlSortIcon('submit')}
                   </th>
+                  <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handlePmlTableSort('approvedPml')}>
+                    Approved PML {renderPmlSortIcon('approvedPml')}
+                  </th>
+                  <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handlePmlTableSort('rejectedPml')}>
+                    Rejected PML {renderPmlSortIcon('rejectedPml')}
+                  </th>
                   <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handlePmlTableSort('draft')}>
                     Draft {renderPmlSortIcon('draft')}
                   </th>
@@ -2820,6 +2899,12 @@ export default function App() {
                     <tr key={pml.pmlName} className="hover:bg-slate-50/50 transition-colors">
                       <td className="p-2.5 pl-4 font-sans font-bold text-slate-600">{pml.pmlName}</td>
                       <td className="p-2.5 text-center font-bold text-slate-800">{pml.submit}</td>
+                      <td className="p-2.5 text-center font-bold text-green-600">
+                        {pml.approvedPml}
+                        <br/>
+                        <span className="text-[9px] text-green-700">({pml.mempawahTarget > 0 ? ((pml.approvedPml / pml.mempawahTarget) * 100).toFixed(1) : 0}%)</span>
+                      </td>
+                      <td className="p-2.5 text-center font-bold text-red-500">{pml.rejectedPml}</td>
                       <td className="p-2.5 text-center text-slate-400">{pml.draft}</td>
                       <td className="p-2.5 text-center">{pml.mempawahTarget}</td>
                       <td className="p-2.5 text-center font-bold text-rose-500">{pml.open}</td>
@@ -2838,7 +2923,7 @@ export default function App() {
                   ))
                 ) : (
                     <tr>
-                    <td colSpan={6} className="p-8 text-center text-slate-400 font-sans">
+                    <td colSpan={8} className="p-8 text-center text-slate-400 font-sans">
                       Tidak ada data akumulasi petugas untuk filter PML terpilih.
                     </td>
                   </tr>
@@ -2851,6 +2936,12 @@ export default function App() {
                       TOTAL {selectedPml === 'ALL' ? 'TIM GABUNGAN' : `TIM ${selectedPml.toUpperCase()}`}
                     </td>
                     <td className="p-3 text-center font-black text-slate-800">{bottomTableTotals.submit}</td>
+                    <td className="p-3 text-center font-black text-green-600">
+                      {bottomTableTotals.approvedPml}
+                      <br/>
+                      <span className="text-[9px] text-green-700">({bottomTableTotals.mempawahTarget > 0 ? ((bottomTableTotals.approvedPml / bottomTableTotals.mempawahTarget) * 100).toFixed(1) : 0}%)</span>
+                    </td>
+                    <td className="p-3 text-center font-black text-red-500">{bottomTableTotals.rejectedPml}</td>
                     <td className="p-3 text-center font-black text-slate-400">{bottomTableTotals.draft}</td>
                     <td className="p-3 text-center text-slate-700 font-black">{bottomTableTotals.mempawahTarget}</td>
                     <td className="p-3 text-center text-rose-600 font-black">{bottomTableTotals.open}</td>
@@ -2953,6 +3044,12 @@ export default function App() {
                   <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handlePjTableSort('submit')}>
                     Jumlah Submit {renderPjSortIcon('submit')}
                   </th>
+                  <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handlePjTableSort('approvedPml')}>
+                    Approved PML {renderPjSortIcon('approvedPml')}
+                  </th>
+                  <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handlePjTableSort('rejectedPml')}>
+                    Rejected PML {renderPjSortIcon('rejectedPml')}
+                  </th>
                   <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handlePjTableSort('draft')}>
                     Jumlah Draf {renderPjSortIcon('draft')}
                   </th>
@@ -2978,6 +3075,12 @@ export default function App() {
                         <td className="p-3 text-center font-mono font-bold text-slate-600">{rec.pplCount}</td>
                         <td className="p-3 text-center font-mono font-bold text-slate-600">{rec.pmlCount}</td>
                         <td className="p-3 text-center font-mono font-bold text-green-600 bg-green-50/20">{rec.submit}</td>
+                        <td className="p-3 text-center font-mono font-bold text-green-700 bg-green-50/20">
+                          {rec.approvedPml}
+                          <br/>
+                          <span className="text-[9px] text-green-800">({rec.target > 0 ? ((rec.approvedPml / rec.target) * 100).toFixed(1) : 0}%)</span>
+                        </td>
+                        <td className="p-3 text-center font-mono font-bold text-red-500 bg-red-50/20">{rec.rejectedPml}</td>
                         <td className="p-3 text-center font-mono font-bold text-amber-500 bg-amber-50/20">{rec.draft}</td>
                         <td className="p-3 text-center font-mono font-bold text-indigo-600 bg-indigo-50/20">{rec.total}</td>
                         <td className="p-3 text-center font-mono font-bold text-slate-500">{rec.target}</td>
@@ -2997,7 +3100,7 @@ export default function App() {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={8} className="p-8 text-center text-slate-400 font-medium">
+                    <td colSpan={10} className="p-8 text-center text-slate-400 font-medium">
                       Tidak ada data PJ.
                     </td>
                   </tr>
@@ -3011,6 +3114,12 @@ export default function App() {
                     <td className="p-3 text-center font-black text-slate-700 font-mono">{pjTableTotals.pplCount}</td>
                     <td className="p-3 text-center font-black text-slate-700 font-mono">{pjTableTotals.pmlCount}</td>
                     <td className="p-3 text-center font-black text-green-700 font-mono">{pjTableTotals.submit}</td>
+                    <td className="p-3 text-center font-black text-green-800 font-mono">
+                      {pjTableTotals.approvedPml}
+                      <br/>
+                      <span className="text-[9px] text-green-900">({pjTableTotals.target > 0 ? ((pjTableTotals.approvedPml / pjTableTotals.target) * 100).toFixed(1) : 0}%)</span>
+                    </td>
+                    <td className="p-3 text-center font-black text-red-600 font-mono">{pjTableTotals.rejectedPml}</td>
                     <td className="p-3 text-center font-black text-amber-600 font-mono">{pjTableTotals.draft}</td>
                     <td className="p-3 text-center font-black text-indigo-700 font-mono">{pjTableTotals.total}</td>
                     <td className="p-3 text-center font-black text-slate-700 font-mono">{pjTableTotals.target}</td>
@@ -3200,6 +3309,12 @@ export default function App() {
                   <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleMempawahTableSort('submit')}>
                     Submit {renderMempawahSortIcon('submit')}
                   </th>
+                  <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleMempawahTableSort('approvedPml')}>
+                    Approved PML {renderMempawahSortIcon('approvedPml')}
+                  </th>
+                  <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleMempawahTableSort('rejectedPml')}>
+                    Rejected PML {renderMempawahSortIcon('rejectedPml')}
+                  </th>
                   <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleMempawahTableSort('draft')}>
                     Draf {renderMempawahSortIcon('draft')}
                   </th>
@@ -3236,6 +3351,12 @@ export default function App() {
                         <td className="p-3 font-extrabold text-slate-900">{rec.pplName}</td>
                         <td className="p-3 font-medium text-slate-600">{rec.pmlName}</td>
                         <td className="p-3 text-center font-mono font-bold text-green-600 bg-green-50/15">{rec.submit}</td>
+                        <td className="p-3 text-center font-mono font-bold text-green-700 bg-green-50/15">
+                          {rec.approvedPml}
+                          <br/>
+                          <span className="text-[9px] text-green-800">({rec.target > 0 ? ((rec.approvedPml / rec.target) * 100).toFixed(1) : 0}%)</span>
+                        </td>
+                        <td className="p-3 text-center font-mono font-bold text-red-500 bg-red-50/15">{rec.rejectedPml}</td>
                         <td className="p-3 text-center font-mono font-bold text-amber-500 bg-amber-50/15">{rec.draft}</td>
                         <td className="p-3 text-center font-mono font-bold text-indigo-600 bg-indigo-50/15">{rec.total}</td>
                         <td className="p-3 text-center font-mono font-bold text-slate-500">{rec.target}</td>
@@ -3257,7 +3378,7 @@ export default function App() {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={13} className="p-8 text-center text-slate-400 font-medium">
+                    <td colSpan={16} className="p-8 text-center text-slate-400 font-medium">
                       Tidak ada data untuk filter wilayah yang aktif.
                     </td>
                   </tr>
