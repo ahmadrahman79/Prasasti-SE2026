@@ -198,6 +198,81 @@ const SearchableSelect = ({
   );
 };
 
+const MultiSelect = ({
+  options,
+  value,
+  onChange,
+  placeholder
+}: {
+  options: { label: string; value: string }[],
+  value: string[],
+  onChange: (val: string[]) => void,
+  placeholder: string
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const toggleOption = (val: string) => {
+    if (val === 'ALL') {
+      onChange(['ALL']);
+    } else {
+      let newValue = value.filter(v => v !== 'ALL');
+      if (newValue.includes(val)) {
+        newValue = newValue.filter(v => v !== val);
+      } else {
+        newValue.push(val);
+      }
+      if (newValue.length === 0) newValue = ['ALL'];
+      onChange(newValue);
+    }
+  };
+
+  const displayValue = value.includes('ALL') ? 'Semua' : `${value.length} Terpilih`;
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <div 
+        className="bg-white border border-slate-200 rounded px-2 py-1 text-xs text-slate-700 hover:border-emerald-400 cursor-pointer flex justify-between items-center w-full min-h-[26px]"
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <span className="truncate pr-2">{displayValue}</span>
+        <ChevronDown size={12} className={`text-slate-400 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </div>
+      {isOpen && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded shadow-lg overflow-hidden">
+          <div className="max-h-48 overflow-y-auto overscroll-contain">
+            {options.map((opt) => (
+              <div 
+                key={opt.value}
+                className="px-2 py-1.5 text-xs cursor-pointer hover:bg-emerald-50 transition-colors flex items-center gap-2 text-slate-700"
+                onClick={() => toggleOption(opt.value)}
+              >
+                <input 
+                  type="checkbox" 
+                  className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 pointer-events-none"
+                  checked={value.includes(opt.value)}
+                  readOnly
+                />
+                <span className="truncate leading-tight">{opt.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const FALLBACK_REKAP_CSV = `"Nama PML","Nama PPL","Submit","Draf","Total","Target"
 "Sulis Tri Handayani","Eva Lutfianti","68","22","90","450"
 "Sulis Tri Handayani","Sri Ratna Dewi","56","0","56","440"
@@ -326,7 +401,8 @@ export default function App() {
   const [selectedMempawahDesaFilter, setSelectedMempawahDesaFilter] = useState<string>('ALL');
   const [selectedMempawahKecFilter, setSelectedMempawahKecFilter] = useState<string>('ALL');
   const [selectedMempawahSlsFilter, setSelectedMempawahSlsFilter] = useState<string>('ALL');
-  const [selectedMempawahGcPbiFilter, setSelectedMempawahGcPbiFilter] = useState<string>('ALL');
+  const [selectedMempawahPercepatanFilter, setSelectedMempawahPercepatanFilter] = useState<string[]>(['ALL']);
+  const [selectedMempawahProgressFilter, setSelectedMempawahProgressFilter] = useState<string[]>(['ALL']);
   const [mempawahSortColumn, setMempawahSortColumn] = useState<string>('progress'); // 'pj' | 'kecamatan' | 'desa' | 'sls' | 'submit' | 'draft' | 'total' | 'target' | 'targetPbi' | 'progress'
   const [mempawahSortDirection, setMempawahSortDirection] = useState<'asc' | 'desc'>('desc');
   const [geoChartLevel, setGeoChartLevel] = useState<'kecamatan' | 'desa'>('kecamatan');
@@ -1181,9 +1257,18 @@ export default function App() {
       const matchSls = selectedMempawahSlsFilter === 'ALL' || rec.sls === selectedMempawahSlsFilter;
       const matchPml = selectedPml === 'ALL' || rec.pmlName === selectedPml;
       const matchPpl = selectedPpl === 'ALL' || rec.pplName === selectedPpl;
-      const matchGcPbi = selectedMempawahGcPbiFilter === 'ALL' || 
-                         (selectedMempawahGcPbiFilter === 'ADA' ? rec.targetPbi > 0 : rec.targetPbi === 0);
-      return matchPj && matchDesa && matchKec && matchSls && matchPml && matchPpl && matchGcPbi;
+      
+      const matchPercepatan = selectedMempawahPercepatanFilter.includes('ALL') || (rec.statusPercepatan && selectedMempawahPercepatanFilter.includes(rec.statusPercepatan));
+      
+      let progStatus = 'BELUM';
+      if (rec.submit >= rec.target && rec.target > 0) {
+        progStatus = 'SELESAI';
+      } else if (rec.submit > 0 || rec.draft > 0) {
+        progStatus = 'PROSES';
+      }
+      const matchProgress = selectedMempawahProgressFilter.includes('ALL') || selectedMempawahProgressFilter.includes(progStatus);
+
+      return matchPj && matchDesa && matchKec && matchSls && matchPml && matchPpl && matchPercepatan && matchProgress;
     });
 
     records = [...records].sort((a, b) => {
@@ -1201,7 +1286,7 @@ export default function App() {
     });
 
     return records;
-  }, [parsedMempawahRecords, selectedMempawahPjFilter, selectedMempawahDesaFilter, selectedMempawahKecFilter, selectedMempawahSlsFilter, selectedPml, selectedPpl, selectedMempawahGcPbiFilter, mempawahSortColumn, mempawahSortDirection]);
+  }, [parsedMempawahRecords, selectedMempawahPjFilter, selectedMempawahDesaFilter, selectedMempawahKecFilter, selectedMempawahSlsFilter, selectedPml, selectedPpl, selectedMempawahPercepatanFilter, selectedMempawahProgressFilter, mempawahSortColumn, mempawahSortDirection]);
 
   const mempawahTotals = useMemo(() => {
     let submit = 0;
@@ -1224,6 +1309,32 @@ export default function App() {
     });
     const progress = target > 0 ? parseFloat(((submit / target) * 100).toFixed(1)) : 0;
     return { submit, draft, total, target, targetPbi, open, progress, approvedPml, rejectedPml };
+  }, [filteredMempawahRecords]);
+
+  const mempawahPercepatanStats = useMemo(() => {
+    const stats: Record<string, { selesai: number; proses: number; belum: number }> = {
+      'Bukan SLS Percepatan': { selesai: 0, proses: 0, belum: 0 },
+      'Prioritas GC PBI': { selesai: 0, proses: 0, belum: 0 },
+      'SLS Percepatan Sakernas Agustus': { selesai: 0, proses: 0, belum: 0 },
+      'Percepatan Sakernas Agustus dan Prioritas GC PBI': { selesai: 0, proses: 0, belum: 0 }
+    };
+
+    filteredMempawahRecords.forEach(rec => {
+      const type = rec.statusPercepatan || 'Bukan SLS Percepatan';
+      if (!stats[type]) {
+        stats[type] = { selesai: 0, proses: 0, belum: 0 };
+      }
+      
+      if (rec.submit >= rec.target && rec.target > 0) {
+        stats[type].selesai++;
+      } else if (rec.submit > 0 || rec.draft > 0) {
+        stats[type].proses++;
+      } else {
+        stats[type].belum++;
+      }
+    });
+
+    return stats;
   }, [filteredMempawahRecords]);
 
   // Top dashboard SLS monitoring stats (All SLS + GC PBI) filtered by global PML and PPL
@@ -3173,7 +3284,7 @@ export default function App() {
             </div>
             
             {/* Multiple Filters Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-3 mt-4 pt-4 border-t border-slate-200/60">
+            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-3 mt-4 pt-4 border-t border-slate-200/60">
               {/* PJ filter */}
               <div className="flex flex-col gap-1">
                 <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wide">Filter PJ:</span>
@@ -3240,17 +3351,33 @@ export default function App() {
               </div>
 
 
-              {/* Target GC PBI filter */}
+              {/* Target GC PBI / Percepatan filter */}
               <div className="flex flex-col gap-1">
-                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wide">Filter Target PBI:</span>
-                <SearchableSelect
-                  value={selectedMempawahGcPbiFilter}
-                  onChange={(val) => { setSelectedMempawahGcPbiFilter(val); setMempawahTablePage(1); }}
-                  placeholder="Pilih PBI..."
+                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wide">Filter Percepatan:</span>
+                <MultiSelect
+                  value={selectedMempawahPercepatanFilter}
+                  onChange={(val) => { setSelectedMempawahPercepatanFilter(val); setMempawahTablePage(1); }}
+                  placeholder="Pilih Status..."
                   options={[
-                    { label: "Semua Target PBI", value: "ALL" },
-                    { label: "Ada Target PBI", value: "ADA" },
-                    { label: "Tidak Ada Target PBI", value: "TIDAK_ADA" }
+                    { label: "Bukan SLS Percepatan", value: "Bukan SLS Percepatan" },
+                    { label: "Prioritas GC PBI", value: "Prioritas GC PBI" },
+                    { label: "SLS Percepatan Sakernas Agustus", value: "SLS Percepatan Sakernas Agustus" },
+                    { label: "Percepatan Sakernas & Prioritas GC PBI", value: "Percepatan Sakernas Agustus dan Prioritas GC PBI" }
+                  ]}
+                />
+              </div>
+
+              {/* Progress Filter */}
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wide">Filter Progres:</span>
+                <MultiSelect
+                  value={selectedMempawahProgressFilter}
+                  onChange={(val) => { setSelectedMempawahProgressFilter(val); setMempawahTablePage(1); }}
+                  placeholder="Pilih Progres..."
+                  options={[
+                    { label: "Selesai", value: "SELESAI" },
+                    { label: "Proses", value: "PROSES" },
+                    { label: "Belum Dikerjakan", value: "BELUM" }
                   ]}
                 />
               </div>
@@ -3284,6 +3411,50 @@ export default function App() {
               <span className="text-sm font-black text-emerald-600 font-mono">{mempawahTotals.progress}%</span>
             </div>
           </div>
+          
+          {/* Percepatan Status Breakdown */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 p-3 bg-slate-50 border-b border-slate-100">
+            {Object.entries(mempawahPercepatanStats).map(([type, stats], idx) => {
+              const typeColor = 
+                type === 'Percepatan Sakernas Agustus dan Prioritas GC PBI' ? 'text-indigo-700 bg-indigo-50 border-indigo-200' :
+                type === 'SLS Percepatan Sakernas Agustus' ? 'text-blue-700 bg-blue-50 border-blue-200' :
+                type === 'Prioritas GC PBI' ? 'text-emerald-700 bg-emerald-50 border-emerald-200' :
+                'text-slate-600 bg-white border-slate-200';
+              
+              const total = stats.selesai + stats.proses + stats.belum;
+              const selesaiPct = total > 0 ? ((stats.selesai / total) * 100).toFixed(0) : 0;
+              const prosesPct = total > 0 ? ((stats.proses / total) * 100).toFixed(0) : 0;
+              const belumPct = total > 0 ? ((stats.belum / total) * 100).toFixed(0) : 0;
+              
+              return (
+                <div key={idx} className={`p-2.5 rounded-md border shadow-3xs flex flex-col gap-1.5 ${typeColor}`}>
+                  <div className="flex justify-between items-center">
+                    <span className="text-[9.5px] font-black uppercase tracking-tight leading-tight block truncate flex-1" title={type}>
+                      {type === 'Percepatan Sakernas Agustus dan Prioritas GC PBI' ? 'Percepatan Sakernas & GC PBI' : type}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-[10px] font-bold">
+                    <div className="flex flex-col items-center flex-1">
+                      <span className="text-emerald-600 font-mono text-sm">{stats.selesai}</span>
+                      <span className="text-emerald-700/60 font-mono text-[9px] leading-none mb-0.5">{selesaiPct}%</span>
+                      <span className="text-slate-500 uppercase text-[8px]">Selesai</span>
+                    </div>
+                    <div className="flex flex-col items-center flex-1">
+                      <span className="text-amber-500 font-mono text-sm">{stats.proses}</span>
+                      <span className="text-amber-600/60 font-mono text-[9px] leading-none mb-0.5">{prosesPct}%</span>
+                      <span className="text-slate-500 uppercase text-[8px]">Proses</span>
+                    </div>
+                    <div className="flex flex-col items-center flex-1">
+                      <span className="text-rose-500 font-mono text-sm">{stats.belum}</span>
+                      <span className="text-rose-600/60 font-mono text-[9px] leading-none mb-0.5">{belumPct}%</span>
+                      <span className="text-slate-500 uppercase text-[8px]">Belum</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
 
 
 
@@ -3327,6 +3498,9 @@ export default function App() {
                   <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleMempawahTableSort('targetPbi')}>
                     Jumlah Target PBI {renderMempawahSortIcon('targetPbi')}
                   </th>
+                  <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleMempawahTableSort('statusPercepatan')}>
+                    Status Percepatan {renderMempawahSortIcon('statusPercepatan')}
+                  </th>
                   <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleMempawahTableSort('open')}>
                     Open {renderMempawahSortIcon('open')}
                   </th>
@@ -3361,6 +3535,7 @@ export default function App() {
                         <td className="p-3 text-center font-mono font-bold text-indigo-600 bg-indigo-50/15">{rec.total}</td>
                         <td className="p-3 text-center font-mono font-bold text-slate-500">{rec.target}</td>
                         <td className="p-3 text-center font-mono font-bold text-blue-600 bg-blue-50/15">{rec.targetPbi}</td>
+                        <td className="p-3 text-center font-sans font-bold text-slate-600 text-[10px] bg-slate-50/50">{rec.statusPercepatan || '-'}</td>
                         <td className="p-3 text-center font-mono font-bold text-rose-500">{rec.open}</td>
                         <td className="p-3 pr-4">
                           <div className="flex items-center gap-2 min-w-[100px]">
@@ -3378,7 +3553,7 @@ export default function App() {
                   })
                 ) : (
                   <tr>
-                    <td colSpan={16} className="p-8 text-center text-slate-400 font-medium">
+                    <td colSpan={17} className="p-8 text-center text-slate-400 font-medium">
                       Tidak ada data untuk filter wilayah yang aktif.
                     </td>
                   </tr>

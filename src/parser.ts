@@ -684,6 +684,7 @@ export interface RekapMempawahRecord {
   open: number;
   approvedPml?: number;
   rejectedPml?: number;
+  statusPercepatan?: string;
 }
 
 export const FALLBACK_REKAP_MEMPAWA_CSV = `"Kecamatan","Desa","SLS","PJ","Nama PPL","Nama PML","Submit","Draf","Total","Target"
@@ -731,6 +732,7 @@ export function parseRekapMempawahCSV(csvText: string): RekapMempawahRecord[] {
   const idxTotal = findIndex(['total', 'total submit+draf', 'total submit + draf'], ['total', 'tot']);
   const idxTarget = findIndex(['target', 'muatan prelist', 'target muatan'], ['target', 'prelist', 'muatan']);
   const idxTargetPbi = findIndex(['jumlah target pbi', 'target pbi', 'pbi'], ['pbi']);
+  const idxStatusSls = findIndex(['status sls percepatan sakernas agustus', 'status sls percepatan'], ['percepatan sakernas', 'percepatan']);
   const idxApprovedPml = findIndex(['approved pml', 'approver pml', 'approved', 'approv'], ['approv']);
   const idxRejectedPml = findIndex(['rejected pml', 'rejected', 'reject'], ['reject']);
 
@@ -755,6 +757,22 @@ export function parseRekapMempawahCSV(csvText: string): RekapMempawahRecord[] {
     const total = idxTotal !== -1 && cols[idxTotal] ? (parseInt(cols[idxTotal], 10) || 0) : (submit + draft);
     const target = idxTarget !== -1 && cols[idxTarget] ? (parseInt(cols[idxTarget], 10) || 0) : total;
     const targetPbi = idxTargetPbi !== -1 && cols[idxTargetPbi] ? (parseInt(cols[idxTargetPbi], 10) || 0) : 0;
+    const statusSls = idxStatusSls !== -1 && cols[idxStatusSls] ? cols[idxStatusSls] : '';
+    
+    let statusPercepatan = '';
+    const isSlsPercepatan = statusSls.toLowerCase().includes('bukan') === false && statusSls.toLowerCase().includes('percepatan');
+    
+    if (!isSlsPercepatan && targetPbi === 0) {
+      statusPercepatan = 'Bukan SLS Percepatan';
+    } else if (!isSlsPercepatan && targetPbi > 0) {
+      statusPercepatan = 'Prioritas GC PBI';
+    } else if (isSlsPercepatan && targetPbi === 0) {
+      statusPercepatan = 'SLS Percepatan Sakernas Agustus';
+    } else if (isSlsPercepatan && targetPbi > 0) {
+      statusPercepatan = 'Percepatan Sakernas Agustus dan Prioritas GC PBI';
+    } else {
+      statusPercepatan = 'Bukan SLS Percepatan'; // default fallback
+    }
     
     const approvedPml = idxApprovedPml !== -1 && cols[idxApprovedPml] ? (parseInt(cols[idxApprovedPml], 10) || 0) : 0;
     const rejectedPml = idxRejectedPml !== -1 && cols[idxRejectedPml] ? (parseInt(cols[idxRejectedPml], 10) || 0) : 0;
@@ -774,6 +792,7 @@ export function parseRekapMempawahCSV(csvText: string): RekapMempawahRecord[] {
         targetPbi,
         approvedPml,
         rejectedPml,
+        statusPercepatan,
         open: Math.max(0, target - (submit + draft))
       });
     }
