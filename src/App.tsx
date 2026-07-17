@@ -53,7 +53,8 @@ import {
   formatIndonesianDate,
   parseCSVLine,
   RekapMempawahRecord,
-  parseProgresHarianCSV
+  parseProgresHarianCSV,
+  parseUsahaTidakDitemukanCSV
 } from './parser';
 import { PPLSummary, Table3Record, PPLDailyProgress, Snapshot2359 } from './types';
 
@@ -418,6 +419,15 @@ export default function App() {
   const [pjTablePage, setPjTablePage] = useState<number>(1);
   const [mempawahTablePage, setMempawahTablePage] = useState<number>(1);
 
+
+  // Usaha Tidak Ditemukan States
+  const [usahaTidakDitemukanCSV, setUsahaTidakDitemukanCSV] = useState<string>('');
+  const [usahaTablePage, setUsahaTablePage] = useState<number>(1);
+  const [usahaItemsPerPage, setUsahaItemsPerPage] = useState<number>(10);
+  const [selectedUsahaKecFilter, setSelectedUsahaKecFilter] = useState<string>('ALL');
+  const [selectedUsahaDesaFilter, setSelectedUsahaDesaFilter] = useState<string>('ALL');
+  const [selectedUsahaSlsFilter, setSelectedUsahaSlsFilter] = useState<string>('ALL');
+
   const trackerDropdownRef = useRef<HTMLDivElement>(null);
 
   // Click outside tracker dropdown to close it
@@ -467,13 +477,18 @@ export default function App() {
       const rekapHarianUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('log rekap kumulatif PPL')}`;
       const progresHarianUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('live progres')}`;
       const rekapMempawahUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('Rekap Mempawah')}`;
+      const usahaTidakDitemukanUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('Usaha Tidak Ditemukan')}`;
 
-      const [rekapRes, rekapHarianRes, progresHarianRes, rekapMempawahRes] = await Promise.all([
+      const [rekapRes, rekapHarianRes, progresHarianRes, rekapMempawahRes, usahaRes] = await Promise.all([
         fetch(rekapUrl),
         fetch(rekapHarianUrl),
         fetch(progresHarianUrl),
         fetch(rekapMempawahUrl).catch(e => {
-          console.warn("Rekap Mempawah sheet fetch failed, using fallback:", e);
+          console.warn('Rekap Mempawah sheet fetch failed, using fallback:', e);
+          return { ok: false } as Response;
+        }),
+        fetch(usahaTidakDitemukanUrl).catch(e => {
+          console.warn('Usaha Tidak Ditemukan sheet fetch failed', e);
           return { ok: false } as Response;
         })
       ]);
@@ -511,7 +526,13 @@ export default function App() {
       setRekapCSV(rekapText);
       setRekapHarianCSV(rekapHarianText);
       setProgresHarianCSV(progresHarianText);
+let usahaText = '';
+      if (usahaRes && usahaRes.ok) { 
+        const txt = await usahaRes.text(); 
+        if (!txt.trim().startsWith('<!doctype')) usahaText = txt; 
+      }
       setRekapMempawahCSV(rekapMempawahText);
+      setUsahaTidakDitemukanCSV(usahaText);
       setDataLamaCSV(""); // Set data lama to empty as requested (only use rekap)
       setIsLive(true);
 
@@ -1181,6 +1202,57 @@ export default function App() {
   const parsedMempawahRecords = useMemo(() => {
     return parseRekapMempawahCSV(rekapMempawahCSV);
   }, [rekapMempawahCSV]);
+
+
+  // Usaha Tidak Ditemukan Logic
+  const parsedUsahaRecords = useMemo(() => {
+    return parseUsahaTidakDitemukanCSV(usahaTidakDitemukanCSV);
+  }, [usahaTidakDitemukanCSV]);
+
+  const usahaFilters = useMemo(() => {
+    const kecamatans = new Set<string>();
+    const desas = new Set<string>();
+    const slss = new Set<string>();
+    
+    parsedUsahaRecords.forEach(rec => {
+      if (rec.kecamatan) kecamatans.add(rec.kecamatan);
+      
+      const matchKec = selectedUsahaKecFilter === 'ALL' || rec.kecamatan === selectedUsahaKecFilter;
+      const matchDesa = selectedUsahaDesaFilter === 'ALL' || rec.desa === selectedUsahaDesaFilter;
+
+      if (matchKec && rec.desa) desas.add(rec.desa);
+      if (matchKec && matchDesa && rec.sls) slss.add(rec.sls);
+    });
+    
+    return {
+      kecamatans: Array.from(kecamatans).sort(),
+      desas: Array.from(desas).sort(),
+      slss: Array.from(slss).sort()
+    };
+  }, [parsedUsahaRecords, selectedUsahaKecFilter, selectedUsahaDesaFilter]);
+
+  const filteredUsahaRecords = useMemo(() => {
+    return parsedUsahaRecords.filter(rec => {
+      const matchKec = selectedUsahaKecFilter === 'ALL' || rec.kecamatan === selectedUsahaKecFilter;
+      const matchDesa = selectedUsahaDesaFilter === 'ALL' || rec.desa === selectedUsahaDesaFilter;
+      const matchSls = selectedUsahaSlsFilter === 'ALL' || rec.sls === selectedUsahaSlsFilter;
+      const matchPml = selectedPml === 'ALL' || rec.pml === selectedPml;
+      const matchPpl = selectedPpl === 'ALL' || rec.ppl === selectedPpl;
+      
+      const matchPj = selectedPjFilter === 'ALL' || rec.pj === selectedPjFilter; 
+
+      return matchKec && matchDesa && matchSls && matchPml && matchPpl && matchPj;
+    });
+  }, [parsedUsahaRecords, selectedUsahaKecFilter, selectedUsahaDesaFilter, selectedUsahaSlsFilter, selectedPml, selectedPpl, selectedPjFilter]);
+
+  const paginatedUsahaRecords = useMemo(() => {
+    const startIndex = (usahaTablePage - 1) * usahaItemsPerPage;
+    return filteredUsahaRecords.slice(startIndex, startIndex + usahaItemsPerPage);
+  }, [filteredUsahaRecords, usahaTablePage, usahaItemsPerPage]);
+
+  const totalUsahaPages = useMemo(() => {
+    return Math.ceil(filteredUsahaRecords.length / usahaItemsPerPage) || 1;
+  }, [filteredUsahaRecords, usahaItemsPerPage]);
 
   // Chart data: Geo progress grouped by kecamatan or desa
   const geoChartData = useMemo(() => {
@@ -3734,6 +3806,160 @@ export default function App() {
             </div>
           )}
         </div>
+
+
+
+          {/* Tabel Usaha Tidak Ditemukan */}
+          <div className="col-span-12 bg-white rounded-lg border border-slate-200 flex flex-col shadow-2xs overflow-hidden mt-6 mb-4">
+            <div className="p-4 bg-slate-50 border-b border-slate-200">
+              <div>
+                <h3 className="text-xs sm:text-sm font-black text-slate-800 uppercase flex items-center gap-2">
+                  <Database size={15} className="text-red-600" />
+                  Usaha Tidak Ditemukan (Updated 16 Juli 2026)
+                </h3>
+                <p className="text-[11px] text-slate-500 font-medium">Daftar usaha yang dilaporkan tidak ditemukan di lapangan.</p>
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-200/60">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wide">Filter Kecamatan:</span>
+                  <SearchableSelect 
+                    value={selectedUsahaKecFilter}
+                    onChange={val => {
+                      setSelectedUsahaKecFilter(val);
+                      setSelectedUsahaDesaFilter('ALL');
+                      setSelectedUsahaSlsFilter('ALL');
+                      setUsahaTablePage(1);
+                    }}
+                    placeholder="Pilih Kecamatan..."
+                    options={[
+                      { label: "Semua Kecamatan", value: "ALL" },
+                      ...usahaFilters.kecamatans.map(k => ({ label: k, value: k }))
+                    ]}
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wide">Filter Desa:</span>
+                  <SearchableSelect 
+                    value={selectedUsahaDesaFilter}
+                    onChange={val => {
+                      setSelectedUsahaDesaFilter(val);
+                      setSelectedUsahaSlsFilter('ALL');
+                      setUsahaTablePage(1);
+                    }}
+                    placeholder="Pilih Desa..."
+                    options={[
+                      { label: "Semua Desa", value: "ALL" },
+                      ...usahaFilters.desas.map(d => ({ label: d, value: d }))
+                    ]}
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wide">Filter SLS:</span>
+                  <SearchableSelect 
+                    value={selectedUsahaSlsFilter}
+                    onChange={val => {
+                      setSelectedUsahaSlsFilter(val);
+                      setUsahaTablePage(1);
+                    }}
+                    placeholder="Pilih SLS..."
+                    options={[
+                      { label: "Semua SLS", value: "ALL" },
+                      ...usahaFilters.slss.map(s => ({ label: s, value: s }))
+                    ]}
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wide">Tampilkan Baris:</span>
+                  <SearchableSelect
+                    value={String(usahaItemsPerPage)}
+                    onChange={(val) => {
+                      setUsahaItemsPerPage(Number(val));
+                      setUsahaTablePage(1);
+                    }}
+                    placeholder="Pilih baris..."
+                    options={[
+                      { label: "10 Baris", value: "10" },
+                      { label: "25 Baris", value: "25" },
+                      { label: "50 Baris", value: "50" },
+                      { label: "100 Baris", value: "100" }
+                    ]}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+
+              <table className="w-full min-w-[900px] text-left text-sm border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px]">
+                    <th className="p-3 whitespace-nowrap border-r border-slate-100">Kecamatan</th>
+                    <th className="p-3 whitespace-nowrap border-r border-slate-100">Desa</th>
+                    <th className="p-3 border-r border-slate-100">Nama SLS</th>
+                    <th className="p-3 border-r border-slate-100">PPL</th>
+                    <th className="p-3 border-r border-slate-100">PML</th>
+                    <th className="p-3 border-r border-slate-100">PJ</th>
+                    <th className="p-3 border-r border-slate-100">Nama Usaha</th>
+                    <th className="p-3 border-r border-slate-100">Source</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {paginatedUsahaRecords.length > 0 ? (
+                    paginatedUsahaRecords.map((item, idx) => (
+                      <tr key={idx} className="hover:bg-rose-50/30 transition-colors">
+                        <td className="p-3 font-semibold text-slate-700 whitespace-nowrap border-r border-slate-100 text-xs">{item.kecamatan}</td>
+                        <td className="p-3 font-semibold text-slate-700 whitespace-nowrap border-r border-slate-100 text-xs">{item.desa}</td>
+                        <td className="p-3 border-r border-slate-100 font-medium text-slate-800 text-xs leading-tight">{item.sls}</td>
+                        <td className="p-3 whitespace-nowrap text-xs text-slate-700 border-r border-slate-100">{item.ppl}</td>
+                        <td className="p-3 whitespace-nowrap text-xs text-slate-700 border-r border-slate-100">{item.pml}</td>
+                        <td className="p-3 whitespace-nowrap text-xs text-slate-600 border-r border-slate-100">{item.pj}</td>
+                        <td className="p-3 font-bold text-indigo-700 text-xs border-r border-slate-100">{item.namaUsaha}</td>
+                        <td className="p-3 text-[10px] text-slate-500 max-w-[150px] truncate" title={item.source}>{item.source}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={8} className="text-center p-8 text-slate-400 font-sans text-sm">
+                        Tidak ada data usaha tidak ditemukan yang cocok dengan filter penelusuran.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {filteredUsahaRecords.length > 0 && (
+              <div className="p-3 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs text-slate-500 font-semibold">
+                <div className="text-slate-500">
+                  Menampilkan <span className="text-slate-800 font-bold">{(usahaTablePage - 1) * usahaItemsPerPage + 1}</span> - <span className="text-slate-800 font-bold">{Math.min(usahaTablePage * usahaItemsPerPage, filteredUsahaRecords.length)}</span> dari <span className="text-slate-800 font-bold">{filteredUsahaRecords.length}</span> baris data
+                </div>
+                <div className="flex gap-1.5 shrink-0 animate-fade-in">
+                  <button
+                    disabled={usahaTablePage === 1}
+                    onClick={() => setUsahaTablePage(prev => Math.max(1, prev - 1))}
+                    className="px-3 py-1.5 bg-white border border-slate-300 rounded hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-white text-slate-600 hover:text-slate-800 font-bold transition-all disabled:cursor-not-allowed cursor-pointer flex items-center shadow-sm"
+                  >
+                    Sebelumnya
+                  </button>
+                  <div className="flex items-center px-2 text-blue-800 font-sans font-bold text-[12px]">
+                    Halaman {usahaTablePage} / {totalUsahaPages}
+                  </div>
+                  <button
+                    disabled={usahaTablePage === totalUsahaPages}
+                    onClick={() => setUsahaTablePage(prev => Math.min(totalUsahaPages, prev + 1))}
+                    className="px-3 py-1.5 bg-white border border-slate-300 rounded hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-white text-slate-600 hover:text-slate-800 font-bold transition-all disabled:cursor-not-allowed cursor-pointer flex items-center shadow-sm"
+                  >
+                    Selanjutnya
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
 
         {/* Sourced directly from 'rekap harian' Google Sheet instead of Firebase. */}
 

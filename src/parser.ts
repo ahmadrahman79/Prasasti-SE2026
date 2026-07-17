@@ -1,5 +1,52 @@
 import { PPLSummary, Table3Record, PPLDailyProgress } from './types';
 
+export interface UsahaTidakDitemukanRecord {
+  kecamatan: string;
+  desa: string;
+  sls: string;
+  ppl: string;
+  pml: string;
+  pj: string;
+  namaUsaha: string;
+  source: string;
+}
+
+export function parseUsahaTidakDitemukanCSV(csv: string): UsahaTidakDitemukanRecord[] {
+  if (!csv) return [];
+  const lines = csv.split('\n').filter(l => l.trim() !== '');
+  if (lines.length < 2) return [];
+
+  const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase().trim());
+  
+  const colIdx = {
+    kecamatan: headers.findIndex(h => h.includes('kecamatan')),
+    desa: headers.findIndex(h => h.includes('desa')),
+    sls: headers.findIndex(h => h.includes('sls') || h.includes('nama sls')),
+    ppl: headers.findIndex(h => h.includes('ppl')),
+    pml: headers.findIndex(h => h.includes('pml')),
+    pj: headers.findIndex(h => h.includes('pj')),
+    namaUsaha: headers.findIndex(h => h.includes('nama_usaha') || h.includes('nama usaha')),
+    source: headers.findIndex(h => h.includes('source')),
+  };
+
+  const records: UsahaTidakDitemukanRecord[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const row = parseCSVLine(lines[i]);
+    if (row.length < 2) continue;
+
+    records.push({
+      kecamatan: colIdx.kecamatan !== -1 ? row[colIdx.kecamatan] || '-' : '-',
+      desa: colIdx.desa !== -1 ? row[colIdx.desa] || '-' : '-',
+      sls: colIdx.sls !== -1 ? row[colIdx.sls] || '-' : '-',
+      ppl: colIdx.ppl !== -1 ? row[colIdx.ppl] || '-' : '-',
+      pml: colIdx.pml !== -1 ? row[colIdx.pml] || '-' : '-',
+      pj: colIdx.pj !== -1 ? row[colIdx.pj] || '-' : '-',
+      namaUsaha: colIdx.namaUsaha !== -1 ? row[colIdx.namaUsaha] || '-' : '-',
+      source: colIdx.source !== -1 ? row[colIdx.source] || '-' : '-'
+    });
+  }
+  return records;
+}
 // Simple but robust CSV line parser that respects double quotes
 export function parseCSVLine(line: string): string[] {
   const result: string[] = [];
