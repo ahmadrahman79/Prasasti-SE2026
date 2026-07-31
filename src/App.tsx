@@ -1553,7 +1553,7 @@ let usahaText = '';
 
   // Combine and sort data for the unified bottom table, filtered dynamically by selectedPml
   const bottomTableData = useMemo(() => {
-    const list: { pmlName: string; pplName: string; submit: number; draft: number; total: number; progress: number; mempawahTarget: number; open: number; approvedPml: number; rejectedPml: number; }[] = [];
+    const list: { pmlName: string; pplName: string; submit: number; draft: number; total: number; progress: number; mempawahTarget: number; open: number; approvedPml: number; rejectedPml: number; cumulativeTarget: number; }[] = [];
     (Object.entries(pmlGroups) as [string, PMLGroupItem[]][]).forEach(([pmlName, ppls]) => {
       if (selectedPml !== 'ALL' && pmlName !== selectedPml) {
         return;
@@ -2938,6 +2938,9 @@ let usahaText = '';
                   <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleBottomTableSort('open')}>
                     Open {renderSortIcon('open')}
                   </th>
+                  <th className="p-3 text-center cursor-pointer hover:bg-slate-100 transition-colors" title="Submit yang masih diperlukan hari ini agar sesuai target kumulatif harian">
+                    Kekurangan Submit
+                  </th>
                   <th className="p-3 text-right pr-6 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => handleBottomTableSort('progress')}>
                     Progres (%) {renderSortIcon('progress')}
                   </th>
@@ -2959,6 +2962,16 @@ let usahaText = '';
                       <td className="p-2.5 text-center text-slate-400">{ppl.draft}</td>
                       <td className="p-2.5 text-center">{ppl.mempawahTarget}</td>
                       <td className="p-2.5 text-center font-bold text-rose-500">{ppl.open}</td>
+                      <td className="p-2.5 text-center">
+                        {(() => {
+                          const kejar = Math.max(0, (ppl.cumulativeTarget || 0) - ppl.submit);
+                          return kejar === 0 ? (
+                            <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-600">✓ On Track</span>
+                          ) : (
+                            <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-600">-{kejar}</span>
+                          );
+                        })()}
+                      </td>
                       <td className="p-2.5 text-right pr-6 font-bold text-blue-600">
                         <div className="inline-flex items-center gap-1.5 justify-end w-full">
                           <span className="text-[11px] font-bold text-slate-700">{ppl.progress}%</span>
@@ -2974,7 +2987,7 @@ let usahaText = '';
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={9} className="p-8 text-center text-slate-400 font-sans">
+                    <td colSpan={10} className="p-8 text-center text-slate-400 font-sans">
                       Tidak ada data akumulasi petugas untuk filter PML terpilih.
                     </td>
                   </tr>
@@ -2996,6 +3009,16 @@ let usahaText = '';
                     <td className="p-3 text-center font-black text-slate-400">{bottomTableTotals.draft}</td>
                     <td className="p-3 text-center text-slate-700 font-black">{bottomTableTotals.mempawahTarget}</td>
                     <td className="p-3 text-center text-rose-600 font-black">{bottomTableTotals.open}</td>
+                    <td className="p-3 text-center">
+                      {(() => {
+                        const totalKejar = bottomTableData.reduce((acc, ppl) => acc + Math.max(0, (ppl.cumulativeTarget || 0) - ppl.submit), 0);
+                        return totalKejar === 0 ? (
+                          <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-600">✓ On Track</span>
+                        ) : (
+                          <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-600">-{totalKejar}</span>
+                        );
+                      })()}
+                    </td>
                     <td className="p-3 text-right pr-6 font-black text-blue-700 font-sans">
                       <span className="font-extrabold text-blue-700 inline-block px-1.5 py-0.5 rounded bg-blue-100/50">{bottomTableTotals.progress}%</span>
                     </td>
