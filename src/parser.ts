@@ -345,14 +345,14 @@ export function parseNewSheetsData(
     records.sort((a, b) => a.date.getTime() - b.date.getTime());
     
     let lastCumulativeRecord: Table3Record | null = null;
-    let prevDailyCumulative: { submit: number, draft: number, total: number } = { submit: 0, draft: 0, total: 0 };
+    let prevDailyCumulative: { submit: number; draft: number; total: number; approvedPml?: number; rejectedPml?: number } = { submit: 0, draft: 0, total: 0, approvedPml: 0, rejectedPml: 0 };
     
     for (let i = 0; i < allDatesList.length; i++) {
       const targetDateObj = allDatesList[i];
       const targetTime = targetDateObj.date.getTime();
       
       // Find the latest record that is ON or BEFORE the targetDate
-      let currentCumulativeRecord = lastCumulativeRecord;
+      let currentCumulativeRecord: Table3Record | null = lastCumulativeRecord;
       for (const rec of records) {
         if (rec.date.getTime() <= targetTime) {
           currentCumulativeRecord = rec;

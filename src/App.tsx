@@ -93,7 +93,7 @@ function getRemainingDaysToMempawahDeadline(): number {
   const diffTime = targetDate.getTime() - today.getTime();
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   
-  return diffDays > 0 ? diffDays : 1;
+  return diffDays > 0 ? diffDays : 0;
 }
 
 // Helper to get active dynamic Indonesian date string with 23:59 WIB daily cutoff
@@ -1333,7 +1333,7 @@ let usahaText = '';
       const matchPercepatan = selectedMempawahPercepatanFilter.includes('ALL') || (rec.statusPercepatan && selectedMempawahPercepatanFilter.includes(rec.statusPercepatan));
       
       let progStatus = 'BELUM';
-      if (rec.submit >= rec.target && rec.target > 0) {
+      if (rec.submit >= rec.target && rec.target > 0 && rec.draft === 0 && rec.open === 0) {
         progStatus = 'SELESAI';
       } else if (rec.submit > 0 || rec.draft > 0) {
         progStatus = 'PROSES';
@@ -1397,7 +1397,7 @@ let usahaText = '';
         stats[type] = { selesai: 0, proses: 0, belum: 0 };
       }
       
-      if (rec.submit >= rec.target && rec.target > 0) {
+      if (rec.submit >= rec.target && rec.target > 0 && rec.draft === 0 && rec.open === 0) {
         stats[type].selesai++;
       } else if (rec.submit > 0 || rec.draft > 0) {
         stats[type].proses++;
@@ -1421,7 +1421,7 @@ let usahaText = '';
 
       // All SLS
       allSls.total++;
-      if (rec.submit >= rec.target && rec.target > 0) {
+      if (rec.submit >= rec.target && rec.target > 0 && rec.draft === 0 && rec.open === 0) {
         allSls.completed++;
       } else if (rec.submit > 0 || rec.draft > 0) {
         allSls.inProgress++;
@@ -1432,7 +1432,7 @@ let usahaText = '';
       // GC PBI
       if (rec.targetPbi > 0) {
         gcPbi.total++;
-        if (rec.submit >= rec.target && rec.target > 0) {
+        if (rec.submit >= rec.target && rec.target > 0 && rec.draft === 0 && rec.open === 0) {
           gcPbi.completed++;
         } else if (rec.submit > 0 || rec.draft > 0) {
           gcPbi.inProgress++;
@@ -1498,14 +1498,15 @@ let usahaText = '';
         groups[rec.pmlName] = [];
       }
       const recMempawahTarget = rec.mempawahTarget || rec.total;
-      const expectedCumulative = Math.ceil((recMempawahTarget / 62) * elapsedDays);
+      // Per 15 Agustus 2026 (62 hari pendataan) target adalah 100%, dan target kumulatif tidak melebihi 100%
+      const expectedCumulative = Math.min(recMempawahTarget, Math.ceil((recMempawahTarget / 62) * Math.min(62, elapsedDays)));
       groups[rec.pmlName].push({
         pplName: rec.pplName,
         submit: rec.submit,
         draft: rec.draft,
         total: rec.total,
         mempawahTarget: recMempawahTarget,
-        open: recMempawahTarget - (rec.submit + rec.draft),
+        open: Math.max(0, recMempawahTarget - (rec.submit + rec.draft)),
         slsCount: pplSlsCounts[rec.pplName] || 0,
         cumulativeTarget: expectedCumulative,
         progress: recMempawahTarget > 0 ? parseFloat(((rec.submit / recMempawahTarget) * 100).toFixed(1)) : 0,
@@ -1698,8 +1699,12 @@ let usahaText = '';
       pplList.forEach(p => {
         const targetLimit = p.mempawahTarget || p.total || 0;
         const submitted = p.submit || 0;
-        const remainingTarget = Math.max(0, targetLimit - submitted);
-        const dailyRequired = remainingDays > 0 && remainingTarget > 0 ? Math.ceil(remainingTarget / remainingDays) : 0;
+        const draft = p.draft || 0;
+        // Sisa dokumen dihitung dari: target - submit - draf
+        const remainingTarget = Math.max(0, targetLimit - submitted - draft);
+        const isOfficerDone = submitted >= targetLimit && targetLimit > 0 && draft === 0 && remainingTarget === 0;
+        const unsubmitted = Math.max(0, targetLimit - submitted);
+        const dailyRequired = remainingDays > 0 && !isOfficerDone ? Math.ceil(unsubmitted / remainingDays) : (!isOfficerDone ? unsubmitted : 0);
         list.push({
           pmlName,
           pplName: p.pplName,
@@ -2250,7 +2255,9 @@ let usahaText = '';
               </div>
               <div className="text-left font-sans min-w-[110px]">
                 <div className="text-[9px] text-slate-400 uppercase font-black tracking-wider">Sisa Hari Kerja</div>
-                <div className="text-base font-black font-mono text-orange-600">{getRemainingDaysToMempawahDeadline()} Hari Lagi</div>
+                <div className="text-base font-black font-mono text-orange-600">
+                  {getRemainingDaysToMempawahDeadline() > 0 ? `${getRemainingDaysToMempawahDeadline()} Hari Lagi` : 'Deadline Berakhir'}
+                </div>
               </div>
             </div>
           </div>
@@ -2314,7 +2321,7 @@ let usahaText = '';
           {paginatedTrackerPpls.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mt-5">
               {paginatedTrackerPpls.map((ppl) => {
-                const isFinished = ppl.remainingTarget === 0;
+                const isFinished = ppl.submit >= ppl.mempawahTarget && ppl.mempawahTarget > 0 && ppl.draft === 0 && ppl.remainingTarget === 0;
                 return (
                   <div 
                     key={ppl.pplName}
@@ -2333,7 +2340,7 @@ let usahaText = '';
                           <div className="text-right">
                             <div className="text-[7.5px] text-blue-400 font-black uppercase tracking-wider leading-none">Target Hari Ini</div>
                             <div className="text-xs font-black text-blue-600 font-mono mt-0.5">
-                              {ppl.mempawahTarget > 0 ? ((ppl.cumulativeTarget / ppl.mempawahTarget) * 100).toFixed(1) : 0}%
+                              {ppl.mempawahTarget > 0 ? Math.min(100, (ppl.cumulativeTarget / ppl.mempawahTarget) * 100).toFixed(1) : 0}%
                             </div>
                           </div>
                           <div className="text-right border-l border-slate-200 pl-3">
@@ -2964,7 +2971,8 @@ let usahaText = '';
                       <td className="p-2.5 text-center font-bold text-rose-500">{ppl.open}</td>
                       <td className="p-2.5 text-center">
                         {(() => {
-                          const kejar = Math.max(0, (ppl.cumulativeTarget || 0) - ppl.submit);
+                          const isDone = ppl.submit >= ppl.mempawahTarget && ppl.mempawahTarget > 0 && ppl.draft === 0 && ppl.open === 0;
+                          const kejar = isDone ? 0 : Math.max(0, (ppl.cumulativeTarget || 0) - ppl.submit);
                           return kejar === 0 ? (
                             <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-600">✓ On Track</span>
                           ) : (
@@ -3011,7 +3019,11 @@ let usahaText = '';
                     <td className="p-3 text-center text-rose-600 font-black">{bottomTableTotals.open}</td>
                     <td className="p-3 text-center">
                       {(() => {
-                        const totalKejar = bottomTableData.reduce((acc, ppl) => acc + Math.max(0, (ppl.cumulativeTarget || 0) - ppl.submit), 0);
+                        const totalKejar = bottomTableData.reduce((acc, ppl) => {
+                          const isDone = ppl.submit >= ppl.mempawahTarget && ppl.mempawahTarget > 0 && ppl.draft === 0 && ppl.open === 0;
+                          if (isDone) return acc;
+                          return acc + Math.max(0, (ppl.cumulativeTarget || 0) - ppl.submit);
+                        }, 0);
                         return totalKejar === 0 ? (
                           <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-600">✓ On Track</span>
                         ) : (
@@ -3509,7 +3521,7 @@ let usahaText = '';
           
           {/* Percepatan Status Breakdown */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 p-3 bg-slate-50 border-b border-slate-100">
-            {Object.entries(mempawahPercepatanStats).map(([type, stats], idx) => {
+            {(Object.entries(mempawahPercepatanStats) as [string, { selesai: number; proses: number; belum: number }][]).map(([type, stats], idx) => {
               const typeColor = 
                 type === 'Percepatan Sakernas Agustus dan Prioritas GC PBI' ? 'text-indigo-700 bg-indigo-50 border-indigo-200' :
                 type === 'SLS Percepatan Sakernas Agustus' ? 'text-blue-700 bg-blue-50 border-blue-200' :
