@@ -729,8 +729,8 @@ export interface RekapMempawahRecord {
   target: number;
   targetPbi: number;
   open: number;
-  approvedPml?: number;
-  rejectedPml?: number;
+  approvedPml: number;
+  rejectedPml: number;
   statusPercepatan?: string;
 }
 
